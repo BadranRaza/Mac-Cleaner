@@ -3,6 +3,9 @@ import Foundation
 public enum CleanupCategory: String, Codable, CaseIterable {
   case unityProjects = "unity-projects"
   case xcodeArtifacts = "xcode-artifacts"
+  case trash = "trash"
+  case applicationCaches = "application-caches"
+  case developerCaches = "developer-caches"
 }
 
 public enum CleanupSafetyLevel: String, Codable {
@@ -229,7 +232,13 @@ public protocol CleanupScanner {
 public struct CleanupEngine {
   private let scanners: [any CleanupScanner]
 
-  public init(scanners: [any CleanupScanner] = [UnityCleanupScanner(), XcodeCleanupScanner()]) {
+  public init(scanners: [any CleanupScanner] = [
+    UnityCleanupScanner(),
+    XcodeCleanupScanner(),
+    TrashCleanupScanner(),
+    AppCachesScanner(),
+    DeveloperCachesScanner()
+  ]) {
     self.scanners = scanners
   }
 

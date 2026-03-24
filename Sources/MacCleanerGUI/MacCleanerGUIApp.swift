@@ -967,6 +967,12 @@ private func iconName(for category: CleanupCategory) -> String {
     return "cube.box.fill"
   case .xcodeArtifacts:
     return "hammer.circle.fill"
+  case .trash:
+    return "trash.fill"
+  case .applicationCaches:
+    return "server.rack"
+  case .developerCaches:
+    return "terminal.fill"
   }
 }
 
@@ -976,6 +982,12 @@ private func colorForCategory(_ category: CleanupCategory) -> Color {
     return Palette.sage
   case .xcodeArtifacts:
     return Palette.sand
+  case .trash:
+    return Palette.coral
+  case .applicationCaches:
+    return Palette.amber
+  case .developerCaches:
+    return Palette.sea
   }
 }
 
@@ -986,6 +998,12 @@ private func scannerIconName(_ scanner: String) -> String {
   }
   if lowercased.contains("xcode") {
     return "hammer.circle.fill"
+  }
+  if lowercased.contains("trash") {
+    return "trash.fill"
+  }
+  if lowercased.contains("cache") {
+    return "server.rack"
   }
   return "scope"
 }
@@ -1015,6 +1033,12 @@ private func friendlyCategoryName(_ key: String) -> String {
     return "Unity"
   case .xcodeArtifacts:
     return "Xcode"
+  case .trash:
+    return "Trash Bin"
+  case .applicationCaches:
+    return "App Caches"
+  case .developerCaches:
+    return "Dev Caches"
   case nil:
     return key
   }
