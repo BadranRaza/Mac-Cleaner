@@ -401,20 +401,7 @@ private struct ScanControlCard: View {
         Rectangle()
           .fill(Palette.sand.opacity(0.18))
           .frame(height: 1)
-
-        HStack(spacing: 16) {
-          IconField(systemName: "gauge.with.dots.needle.50percent", placeholder: "6", text: $scanStore.minimumConfidence, width: 100)
-          IconField(systemName: "arrow.down.right.and.arrow.up.left", placeholder: "Unlimited", text: $scanStore.maxDepth, width: 130)
-        }
-
-
-
         HStack {
-          if !scanStore.isInputValid && !scanStore.minimumConfidence.isEmpty {
-            Text("Minimum confidence should be between 0 and 10.")
-              .font(.system(size: 12, weight: .semibold, design: .rounded))
-              .foregroundStyle(Palette.coral)
-          }
           Spacer()
           Button {
             scanStore.scan()
@@ -1088,8 +1075,6 @@ private struct FlowLayout: Layout {
 @MainActor
 final class ScanStore: ObservableObject {
   @Published var selectedRoots: [URL]
-  @Published var minimumConfidence: String = "6"
-  @Published var maxDepth: String = ""
   @Published var isScanning: Bool = false
   @Published var status: String = "Ready"
   @Published var lastReport: CleanupScanReport?
@@ -1098,15 +1083,8 @@ final class ScanStore: ObservableObject {
     selectedRoots = ScanRootBookmarkStore.loadURLs()
   }
 
-  var isInputValid: Bool {
-    if let value = Int(minimumConfidence.trimmingCharacters(in: .whitespacesAndNewlines)) {
-      return value >= 0 && value <= 10
-    }
-    return false
-  }
-
   var canScan: Bool {
-    isInputValid && !selectedRoots.isEmpty
+    !selectedRoots.isEmpty
   }
 
   func scan() {
@@ -1117,22 +1095,15 @@ final class ScanStore: ObservableObject {
       return
     }
 
-    guard isInputValid else {
-      status = "Enter a valid minimum confidence."
-      return
-    }
-
-    let minimumConfidenceValue = Int(minimumConfidence.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 6
     let parsedRoots = selectedRoots
       .map { $0.standardizedFileURL.path }
       .filter { !$0.isEmpty }
     let scanRoots = selectedRoots
 
-    let parsedMaxDepth = Int(maxDepth.trimmingCharacters(in: .whitespacesAndNewlines))
     let options = CleanupScanOptions(
       roots: parsedRoots,
-      minimumConfidence: minimumConfidenceValue,
-      maxDepth: parsedMaxDepth.flatMap { $0 > 0 ? $0 : nil }
+      minimumConfidence: 6,
+      maxDepth: nil
     )
 
     isScanning = true
