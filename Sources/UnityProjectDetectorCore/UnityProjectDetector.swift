@@ -25,6 +25,10 @@ public struct UnityProjectCandidate: Codable, Equatable {
     ["Library", "Temp", "Obj", "Logs", "UserSettings"]
   }
 
+  public var reviewCleanTargets: [String] {
+    ["Build", "Builds"]
+  }
+
   public var isHighConfidence: Bool {
     confidence >= 10
   }

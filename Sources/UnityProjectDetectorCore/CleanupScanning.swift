@@ -295,47 +295,78 @@ public struct UnityCleanupScanner: CleanupScanner {
       maxDepth: options.maxDepth
     )
 
-    return detector.scan(options: detectorOptions).compactMap { candidate in
+    return detector.scan(options: detectorOptions).flatMap { candidate -> [CleanupFinding] in
       let pathURL = URL(fileURLWithPath: candidate.path)
       let projectName = pathURL.lastPathComponent.isEmpty ? candidate.path : pathURL.lastPathComponent
       let version = candidate.unityVersion ?? "unknown"
 
-      // Only include cleanup targets that actually exist on disk.
-      let cleanupTargets = candidate.safeCleanTargets.compactMap { targetName -> CleanupTargetDescriptor? in
+      var findings: [CleanupFinding] = []
+
+      // 1. Safe Build Caches
+      let safeTargets = candidate.safeCleanTargets.compactMap { targetName -> CleanupTargetDescriptor? in
         let targetURL = pathURL.appendingPathComponent(targetName, isDirectory: true)
-        guard CleanupSizing.directoryExists(at: targetURL) else {
-          return nil
-        }
+        guard CleanupSizing.directoryExists(at: targetURL) else { return nil }
         return CleanupTargetDescriptor(name: targetName, relativePath: targetName)
       }
 
-      // Skip findings with no reclaimable targets.
-      guard !cleanupTargets.isEmpty else {
-        return nil
+      if !safeTargets.isEmpty {
+        let estimatedBytes = safeTargets.reduce(into: Int64(0)) { partialResult, target in
+          let targetURL = pathURL.appendingPathComponent(target.relativePath, isDirectory: true)
+          partialResult += CleanupSizing.directorySize(at: targetURL)
+        }
+        let sizeSummary = CleanupSizing.byteCountString(for: estimatedBytes)
+
+        findings.append(CleanupFinding(
+          id: "\(id):safe:\(candidate.path)",
+          title: projectName,
+          subtitle: "Unity Caches",
+          metadata: "Unity \(version) • \(candidate.detectedBy.count) marker(s) • \(sizeSummary) reclaimable",
+          path: candidate.path,
+          category: .unityProjects,
+          sourceScanner: displayName,
+          confidenceScore: candidate.confidence,
+          detectedBy: candidate.detectedBy,
+          detectedAt: candidate.detectedAt,
+          estimatedBytes: estimatedBytes,
+          cleanupTargets: safeTargets,
+          recommendedAction: candidate.recommendedCleanupAction,
+          safetyLevel: candidate.confidence >= 10 ? .safeWithConfirmation : .reviewRecommended
+        ))
       }
 
-      let estimatedBytes = cleanupTargets.reduce(into: Int64(0)) { partialResult, target in
-        let targetURL = pathURL.appendingPathComponent(target.relativePath, isDirectory: true)
-        partialResult += CleanupSizing.directorySize(at: targetURL)
+      // 2. Reviewable Builds
+      let reviewTargets = candidate.reviewCleanTargets.compactMap { targetName -> CleanupTargetDescriptor? in
+        let targetURL = pathURL.appendingPathComponent(targetName, isDirectory: true)
+        guard CleanupSizing.directoryExists(at: targetURL) else { return nil }
+        return CleanupTargetDescriptor(name: targetName, relativePath: targetName)
       }
-      let sizeSummary = CleanupSizing.byteCountString(for: estimatedBytes)
 
-      return CleanupFinding(
-        id: "\(id):\(candidate.path)",
-        title: projectName,
-        subtitle: "Unity project",
-        metadata: "Unity \(version) • \(candidate.detectedBy.count) marker(s) • \(sizeSummary) reclaimable",
-        path: candidate.path,
-        category: .unityProjects,
-        sourceScanner: displayName,
-        confidenceScore: candidate.confidence,
-        detectedBy: candidate.detectedBy,
-        detectedAt: candidate.detectedAt,
-        estimatedBytes: estimatedBytes,
-        cleanupTargets: cleanupTargets,
-        recommendedAction: candidate.recommendedCleanupAction,
-        safetyLevel: candidate.confidence >= 10 ? .safeWithConfirmation : .reviewRecommended
-      )
+      if !reviewTargets.isEmpty {
+        let estimatedBytes = reviewTargets.reduce(into: Int64(0)) { partialResult, target in
+          let targetURL = pathURL.appendingPathComponent(target.relativePath, isDirectory: true)
+          partialResult += CleanupSizing.directorySize(at: targetURL)
+        }
+        let sizeSummary = CleanupSizing.byteCountString(for: estimatedBytes)
+
+        findings.append(CleanupFinding(
+          id: "\(id):build:\(candidate.path)",
+          title: projectName,
+          subtitle: "Unity Builds",
+          metadata: "Compiled outputs • \(sizeSummary) reclaimable",
+          path: candidate.path,
+          category: .unityProjects,
+          sourceScanner: displayName,
+          confidenceScore: candidate.confidence,
+          detectedBy: ["Build directories"],
+          detectedAt: candidate.detectedAt,
+          estimatedBytes: estimatedBytes,
+          cleanupTargets: reviewTargets,
+          recommendedAction: "Review carefully. These folders may contain finalized compiled games, Xcode projects, or release artifacts you have not backed up yet.",
+          safetyLevel: .reviewRecommended
+        ))
+      }
+
+      return findings
     }
   }
 }
