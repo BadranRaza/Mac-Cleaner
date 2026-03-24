@@ -4,10 +4,9 @@ import MacCleanerCore
 let arguments = CommandLine.arguments.dropFirst()
 let printJSON = arguments.contains("--json")
 let apiMode = arguments.contains("--api")
-let followSymlinks = arguments.contains("--follow-symlinks")
 
 let roots: [String] = arguments.compactMap { arg in
-  if arg == "--json" || arg == "--api" || arg == "--follow-symlinks" || arg.hasPrefix("--max-depth=") || arg.hasPrefix("--minimum-confidence=") {
+  if arg == "--json" || arg == "--api" || arg.hasPrefix("--max-depth=") || arg.hasPrefix("--minimum-confidence=") {
     return nil
   }
 
@@ -33,8 +32,7 @@ let minimumConfidence = minimumConfidenceArg.flatMap { arg in
 let options = UnityProjectDetectorOptions(
   roots: roots.isEmpty ? [FileManager.default.currentDirectoryPath] : roots,
   minimumConfidence: minimumConfidence ?? 6,
-  maxDepth: maxDepth,
-  followSymlinks: followSymlinks
+  maxDepth: maxDepth
 )
 
 let detector = UnityProjectDetector()

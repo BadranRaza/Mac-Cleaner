@@ -34,18 +34,15 @@ public struct UnityProjectDetectorOptions {
   public let roots: [String]
   public let minimumConfidence: Int
   public let maxDepth: Int?
-  public let followSymlinks: Bool
 
   public init(
     roots: [String] = [],
     minimumConfidence: Int = 6,
-    maxDepth: Int? = nil,
-    followSymlinks: Bool = false
+    maxDepth: Int? = nil
   ) {
     self.roots = roots
     self.minimumConfidence = minimumConfidence
     self.maxDepth = maxDepth
-    self.followSymlinks = followSymlinks
   }
 
   public static let `default` = UnityProjectDetectorOptions()
@@ -173,7 +170,7 @@ public final class UnityProjectDetector {
         continue
       }
 
-      if options.followSymlinks == false && (values.isSymbolicLink == true) {
+      if values.isSymbolicLink == true {
         continue
       }
 

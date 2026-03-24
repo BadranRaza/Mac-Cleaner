@@ -407,22 +407,7 @@ private struct ScanControlCard: View {
           IconField(systemName: "arrow.down.right.and.arrow.up.left", placeholder: "Unlimited", text: $scanStore.maxDepth, width: 130)
         }
 
-        DisclosureGroup(isExpanded: $showAdvancedOptions) {
-          VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: $scanStore.followSymlinks) {
-              HStack(spacing: 8) {
-                Image(systemName: "arrow.triangle.branch")
-                Text("Follow Symlinks")
-              }
-            }
-          }
-          .padding(.top, 4)
-        } label: {
-          Image(systemName: "switch.2")
-            .foregroundStyle(Palette.sand)
-            .help("Advanced scan options")
-        }
-        .tint(Palette.sand)
+
 
         HStack {
           if !scanStore.isInputValid && !scanStore.minimumConfidence.isEmpty {
@@ -1105,7 +1090,6 @@ final class ScanStore: ObservableObject {
   @Published var selectedRoots: [URL]
   @Published var minimumConfidence: String = "6"
   @Published var maxDepth: String = ""
-  @Published var followSymlinks: Bool = false
   @Published var isScanning: Bool = false
   @Published var status: String = "Ready"
   @Published var lastReport: CleanupScanReport?
@@ -1148,8 +1132,7 @@ final class ScanStore: ObservableObject {
     let options = CleanupScanOptions(
       roots: parsedRoots,
       minimumConfidence: minimumConfidenceValue,
-      maxDepth: parsedMaxDepth.flatMap { $0 > 0 ? $0 : nil },
-      followSymlinks: followSymlinks
+      maxDepth: parsedMaxDepth.flatMap { $0 > 0 ? $0 : nil }
     )
 
     isScanning = true

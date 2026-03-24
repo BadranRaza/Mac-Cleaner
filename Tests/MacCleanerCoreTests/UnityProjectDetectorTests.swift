@@ -13,8 +13,7 @@ struct UnityProjectDetectorTests {
       options: UnityProjectDetectorOptions(
         roots: [fixture.projectURL.path],
         minimumConfidence: 6,
-        maxDepth: 2,
-        followSymlinks: false
+        maxDepth: 2
       )
     )
 
@@ -32,8 +31,7 @@ struct UnityProjectDetectorTests {
       options: UnityProjectDetectorOptions(
         roots: [fixture.rootURL.path],
         minimumConfidence: 6,
-        maxDepth: 2,
-        followSymlinks: false
+        maxDepth: 2
       )
     )
 
@@ -50,8 +48,7 @@ struct UnityProjectDetectorTests {
       options: CleanupScanOptions(
         roots: [fixture.rootURL.path],
         minimumConfidence: 6,
-        maxDepth: 2,
-        followSymlinks: false
+        maxDepth: 2
       )
     )
 
@@ -71,8 +68,7 @@ struct UnityProjectDetectorTests {
       options: CleanupScanOptions(
         roots: [fixture.rootURL.path],
         minimumConfidence: 6,
-        maxDepth: 6,
-        followSymlinks: false
+        maxDepth: 6
       )
     )
 
@@ -94,8 +90,7 @@ struct UnityProjectDetectorTests {
       options: CleanupScanOptions(
         roots: [fixture.derivedDataURL.path],
         minimumConfidence: 6,
-        maxDepth: 2,
-        followSymlinks: false
+        maxDepth: 2
       )
     )
 
