@@ -658,7 +658,10 @@ private struct FindingRow: View {
           Button {
             NSWorkspace.shared.open(URL(fileURLWithPath: item.path))
           } label: {
-            Image(systemName: "folder")
+            HStack(spacing: 6) {
+              Image(systemName: "folder")
+              Text("Reveal")
+            }
           }
           .buttonStyle(LuxurySecondaryButtonStyle())
           .help("Reveal in Finder")
