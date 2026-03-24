@@ -660,7 +660,7 @@ private struct FindingRow: View {
           } label: {
             HStack(spacing: 6) {
               Image(systemName: "folder")
-              Text("Reveal")
+              Text("Reveal in Finder")
             }
           }
           .buttonStyle(LuxurySecondaryButtonStyle())
