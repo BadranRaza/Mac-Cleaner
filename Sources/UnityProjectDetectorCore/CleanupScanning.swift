@@ -6,6 +6,8 @@ public enum CleanupCategory: String, Codable, CaseIterable {
   case trash = "trash"
   case applicationCaches = "application-caches"
   case developerCaches = "developer-caches"
+  case mailAttachments = "mail-attachments"
+  case packageManagers = "package-managers"
 }
 
 public enum CleanupSafetyLevel: String, Codable {
@@ -237,7 +239,9 @@ public struct CleanupEngine {
     XcodeCleanupScanner(),
     TrashCleanupScanner(),
     AppCachesScanner(),
-    DeveloperCachesScanner()
+    DeveloperCachesScanner(),
+    MailAttachmentsScanner(),
+    PackageManagerScanner()
   ]) {
     self.scanners = scanners
   }
@@ -426,7 +430,10 @@ public struct XcodeCleanupScanner: CleanupScanner {
 
     let isDerivedData = name == "DerivedData" && pathComponents.contains("Xcode")
     let isArchives = name == "Archives" && pathComponents.contains("Xcode")
-    guard isDerivedData || isArchives else {
+    let isDeviceSupport = name == "iOS DeviceSupport" && pathComponents.contains("Xcode")
+    let isSimulatorCaches = name == "Caches" && pathComponents.contains("CoreSimulator")
+    
+    guard isDerivedData || isArchives || isDeviceSupport || isSimulatorCaches else {
       return nil
     }
 
@@ -453,21 +460,59 @@ public struct XcodeCleanupScanner: CleanupScanner {
       )
     }
 
+    if isArchives {
+      return CleanupFinding(
+        id: "\(id):\(path)",
+        title: "Xcode Archives",
+        subtitle: "Archived builds",
+        metadata: "\(itemCount) item(s) • \(sizeSummary) reclaimable",
+        path: path,
+        category: .xcodeArtifacts,
+        sourceScanner: displayName,
+        confidenceScore: 8,
+        detectedBy: ["Xcode/Archives"],
+        detectedAt: Date(),
+        estimatedBytes: estimatedBytes,
+        cleanupTargets: [CleanupTargetDescriptor(name: "All contents", relativePath: ".")],
+        recommendedAction: "Review archives before cleanup. Delete only archives you no longer need for distribution, symbolication, or export history.",
+        safetyLevel: .reviewRecommended
+      )
+    }
+
+    if isDeviceSupport {
+      return CleanupFinding(
+        id: "\(id):\(path)",
+        title: "iOS Device Support",
+        subtitle: "Device debug symbols",
+        metadata: "\(itemCount) item(s) • \(sizeSummary) reclaimable",
+        path: path,
+        category: .xcodeArtifacts,
+        sourceScanner: displayName,
+        confidenceScore: 9,
+        detectedBy: ["Xcode/iOS DeviceSupport"],
+        detectedAt: Date(),
+        estimatedBytes: estimatedBytes,
+        cleanupTargets: [CleanupTargetDescriptor(name: "All contents", relativePath: ".")],
+        recommendedAction: "Safe to delete. Xcode will reconstruct symbols from connected devices automatically when you plug them in again.",
+        safetyLevel: .safeWithConfirmation
+      )
+    }
+
     return CleanupFinding(
       id: "\(id):\(path)",
-      title: "Xcode Archives",
-      subtitle: "Archived builds",
+      title: "CoreSimulator Caches",
+      subtitle: "iOS Simulator logs & caches",
       metadata: "\(itemCount) item(s) • \(sizeSummary) reclaimable",
       path: path,
       category: .xcodeArtifacts,
       sourceScanner: displayName,
-      confidenceScore: 8,
-      detectedBy: ["Xcode/Archives"],
+      confidenceScore: 10,
+      detectedBy: ["CoreSimulator/Caches"],
       detectedAt: Date(),
       estimatedBytes: estimatedBytes,
       cleanupTargets: [CleanupTargetDescriptor(name: "All contents", relativePath: ".")],
-      recommendedAction: "Review archives before cleanup. Delete only archives you no longer need for distribution, symbolication, or export history.",
-      safetyLevel: .reviewRecommended
+      recommendedAction: "Safe to delete. Simulators regenerate these caches on demand.",
+      safetyLevel: .safeWithConfirmation
     )
   }
 }

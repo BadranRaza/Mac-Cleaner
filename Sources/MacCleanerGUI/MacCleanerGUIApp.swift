@@ -15,6 +15,8 @@ private enum Palette {
   static let sea = Color(red: 0.23, green: 0.28, blue: 0.26)
   static let alabaster = Color(red: 0.97, green: 0.94, blue: 0.89)
   static let smoke = Color(red: 0.78, green: 0.74, blue: 0.67)
+  static let cyan = Color(red: 0.30, green: 0.45, blue: 0.50)
+  static let mint = Color(red: 0.40, green: 0.50, blue: 0.45)
 }
 
 @main
@@ -1003,6 +1005,10 @@ private func iconName(for category: CleanupCategory) -> String {
     return "server.rack"
   case .developerCaches:
     return "terminal.fill"
+  case .mailAttachments:
+    return "envelope.fill"
+  case .packageManagers:
+    return "shippingbox.fill"
   }
 }
 
@@ -1018,6 +1024,10 @@ private func colorForCategory(_ category: CleanupCategory) -> Color {
     return Palette.amber
   case .developerCaches:
     return Palette.sea
+  case .mailAttachments:
+    return Palette.cyan
+  case .packageManagers:
+    return Palette.mint
   }
 }
 
@@ -1034,6 +1044,12 @@ private func scannerIconName(_ scanner: String) -> String {
   }
   if lowercased.contains("cache") {
     return "server.rack"
+  }
+  if lowercased.contains("mail") {
+    return "envelope.fill"
+  }
+  if lowercased.contains("package") {
+    return "shippingbox.fill"
   }
   return "scope"
 }
@@ -1069,6 +1085,10 @@ private func friendlyCategoryName(_ key: String) -> String {
     return "App Caches"
   case .developerCaches:
     return "Dev Caches"
+  case .mailAttachments:
+    return "Mail Attachments"
+  case .packageManagers:
+    return "Package Managers"
   case nil:
     return key
   }
