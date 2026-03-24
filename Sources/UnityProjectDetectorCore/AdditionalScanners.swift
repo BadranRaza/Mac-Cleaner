@@ -83,6 +83,18 @@ public struct TrashCleanupScanner: CleanupScanner {
     // Don't report empty trash
     guard itemCount > 0 else { return nil }
 
+    // macOS prevents deleting ~/.Trash itself. We must target its contents explicitly.
+    var targets: [CleanupTargetDescriptor] = []
+    if let children = try? fileManager.contentsOfDirectory(atPath: directoryURL.path) {
+      for child in children {
+        // Skip .DS_Store or other weird hidden files if desired, but letting it all go is fine
+        targets.append(CleanupTargetDescriptor(name: child, relativePath: child))
+      }
+    }
+    
+    // Fallback if permission prevents listing empty contents
+    if targets.isEmpty { return nil }
+
     let sizeSummary = CleanupSizing.byteCountString(for: estimatedBytes)
 
     return CleanupFinding(
@@ -97,7 +109,7 @@ public struct TrashCleanupScanner: CleanupScanner {
       detectedBy: ["Trash folder"],
       detectedAt: Date(),
       estimatedBytes: estimatedBytes,
-      cleanupTargets: [CleanupTargetDescriptor(name: "All contents", relativePath: ".")],
+      cleanupTargets: targets,
       recommendedAction: "Safe to empty trash. Files are permanently deleted.",
       safetyLevel: .safeWithConfirmation
     )

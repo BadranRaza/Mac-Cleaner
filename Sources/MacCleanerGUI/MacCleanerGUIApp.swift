@@ -341,83 +341,41 @@ private struct IdleOverviewCard: View {
 
 private struct ScanControlCard: View {
   @EnvironmentObject var scanStore: ScanStore
-  @State private var showAdvancedOptions = false
 
   var body: some View {
     MacPanel(tint: Palette.ink, style: .dark) {
-      VStack(alignment: .leading, spacing: 16) {
-        HStack(spacing: 10) {
-          Image(systemName: "slider.horizontal.3")
-            .font(.system(size: 18, weight: .semibold))
-            .foregroundStyle(Palette.sand)
-          Text("Setup")
-            .font(.system(size: 28, weight: .bold, design: .serif))
-            .foregroundStyle(Palette.alabaster)
-        }
+      VStack(alignment: .center, spacing: 16) {
+        
+        Image(systemName: "desktopcomputer")
+          .font(.system(size: 64, weight: .light))
+          .foregroundStyle(Palette.sand)
+          .padding(.bottom, 10)
+          
+        Text("Scan Entire Mac")
+          .font(.system(size: 28, weight: .bold, design: .serif))
+          .foregroundStyle(Palette.alabaster)
+          
+        Text("Analyzes all user profiles (e.g. /Users) for hidden caches, logs, developer leftovers, and trash.")
+          .font(.system(size: 14, weight: .regular, design: .rounded))
+          .foregroundStyle(Palette.smoke)
+          .multilineTextAlignment(.center)
+          .padding(.horizontal, 20)
 
-        VStack(alignment: .leading, spacing: 10) {
+        Button {
+          scanStore.scan()
+        } label: {
           HStack(spacing: 12) {
-            Spacer()
-
-            Button {
-              scanStore.addScanRoots()
-            } label: {
-              Image(systemName: "folder.badge.plus")
-            }
-            .buttonStyle(LuxurySecondaryButtonStyle())
-            .help("Add scan folders")
-            .accessibilityLabel("Add scan folders")
-
-            Button {
-              scanStore.clearScanRoots()
-            } label: {
-              Image(systemName: "trash")
-            }
-            .buttonStyle(LuxurySecondaryButtonStyle())
-            .disabled(scanStore.selectedRoots.isEmpty)
-            .help("Clear scan folders")
-            .accessibilityLabel("Clear scan folders")
-          }
-
-          if !scanStore.selectedRoots.isEmpty {
-            ScrollView {
-              VStack(alignment: .leading, spacing: 8) {
-                ForEach(scanStore.selectedRoots, id: \.self) { root in
-                  ScanRootRow(url: root) {
-                    scanStore.removeSelectedRoot(root)
-                  }
-                }
-              }
-            }
-            .frame(maxHeight: 120)
-            .padding(10)
-            .background(Color.white.opacity(0.05))
-            .overlay(
-              RoundedRectangle(cornerRadius: 18)
-                .stroke(Palette.sand.opacity(0.18), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 18))
-          }
-        }
-
-        Rectangle()
-          .fill(Palette.sand.opacity(0.18))
-          .frame(height: 1)
-        HStack {
-          Spacer()
-          Button {
-            scanStore.scan()
-          } label: {
             Image(systemName: scanStore.isScanning ? "hourglass" : "magnifyingglass")
-              .font(.system(size: 18, weight: .semibold))
-              .frame(width: 48, height: 44)
+            Text(scanStore.isScanning ? "Scanning..." : "Start Full Scan")
           }
-          .buttonStyle(LuxuryPrimaryButtonStyle())
-          .keyboardShortcut(.defaultAction)
-          .disabled(scanStore.isScanning || !scanStore.canScan)
-          .help(scanStore.isScanning ? "Scanning" : "Run scan")
-          .accessibilityLabel(scanStore.isScanning ? "Scanning" : "Run scan")
+          .font(.system(size: 18, weight: .semibold, design: .rounded))
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 8)
         }
+        .buttonStyle(LuxuryPrimaryButtonStyle())
+        .keyboardShortcut(.defaultAction)
+        .disabled(scanStore.isScanning)
+        .padding(.top, 14)
       }
     }
   }
@@ -487,48 +445,78 @@ private struct StatusCard: View {
 }
 
 private struct SummaryCard: View {
-  let report: CleanupScanReport
+let report: CleanupScanReport
+@EnvironmentObject var scanStore: ScanStore
+@State private var showingConfirmation = false
 
-  var body: some View {
-    MacPanel(tint: Palette.ink, style: .dark) {
-      VStack(alignment: .leading, spacing: 18) {
-        HStack(alignment: .top, spacing: 16) {
-          HStack(spacing: 10) {
-            Image(systemName: "arrow.down.circle.fill")
-              .foregroundStyle(Palette.sand)
-            Text(formattedByteCount(report.totalEstimatedBytes))
-              .font(.system(size: 42, weight: .bold, design: .serif))
-              .foregroundStyle(Palette.alabaster)
-          }
+var body: some View {
+MacPanel(tint: Palette.ink, style: .dark) {
+  VStack(alignment: .leading, spacing: 18) {
+    HStack(alignment: .top, spacing: 16) {
+      HStack(spacing: 10) {
+        Image(systemName: "arrow.down.circle.fill")
+          .foregroundStyle(Palette.sand)
+        Text(formattedByteCount(report.totalEstimatedBytes))
+          .font(.system(size: 42, weight: .bold, design: .serif))
+          .foregroundStyle(Palette.alabaster)
+      }
 
-          Spacer()
+      Spacer()
 
-          HStack(spacing: 12) {
-            ScoreBadge(value: report.summary.high, systemName: "checkmark.shield.fill", color: Palette.sage)
-            ScoreBadge(value: report.summary.medium, systemName: "eye.fill", color: Palette.amber)
-            ScoreBadge(value: report.summary.total, systemName: "square.stack.3d.up.fill", color: Palette.sea)
-          }
-        }
+      HStack(spacing: 12) {
+        ScoreBadge(value: report.summary.high, systemName: "checkmark.shield.fill", color: Palette.sage)
+        ScoreBadge(value: report.summary.medium, systemName: "eye.fill", color: Palette.amber)
+        ScoreBadge(value: report.summary.total, systemName: "square.stack.3d.up.fill", color: Palette.sea)
+      }
+    }
 
-        HStack(spacing: 10) {
-          IconPill(systemName: "clock.fill", value: report.scannedAt.formatted(date: .omitted, time: .shortened), accent: Palette.smoke)
-          IconPill(systemName: "folder.fill", value: "\(report.scannedRoots.count)", accent: Palette.sand)
-        }
+    HStack(spacing: 10) {
+      IconPill(systemName: "clock.fill", value: report.scannedAt.formatted(date: .omitted, time: .shortened), accent: Palette.smoke)
+      IconPill(systemName: "folder.fill", value: "\(report.scannedRoots.count)", accent: Palette.sand)
+    }
 
-        if !report.categorySummary.isEmpty {
-          FlowLayout {
-            ForEach(report.categorySummary.keys.sorted(), id: \.self) { key in
-              IconPill(
-                systemName: iconName(for: CleanupCategory(rawValue: key) ?? .xcodeArtifacts),
-                value: "\(report.categorySummary[key, default: 0])",
-                accent: colorForCategoryKey(key)
-              )
-            }
-          }
+    if !report.categorySummary.isEmpty {
+      FlowLayout {
+        ForEach(report.categorySummary.keys.sorted(), id: \.self) { key in
+          IconPill(
+            systemName: iconName(for: CleanupCategory(rawValue: key) ?? .xcodeArtifacts),
+            value: "\(report.categorySummary[key, default: 0])",
+            accent: colorForCategoryKey(key)
+          )
         }
       }
     }
+
+    if !scanStore.selectedFindingIDs.isEmpty {
+      Divider()
+        .background(Color.white.opacity(0.1))
+        .padding(.vertical, 8)
+
+      Button {
+        showingConfirmation = true
+      } label: {
+        HStack {
+          Image(systemName: "trash.fill")
+          Text("Clean \(scanStore.selectedFindingIDs.count) Selected Item(s)")
+            .font(.system(size: 16, weight: .bold, design: .rounded))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+      }
+      .buttonStyle(LuxuryPrimaryButtonStyle())
+      .disabled(scanStore.isCleaning)
+      .alert("Confirm Cleanup", isPresented: $showingConfirmation) {
+        Button("Cancel", role: .cancel) { }
+        Button("Delete Selected", role: .destructive) {
+          scanStore.cleanSelected()
+        }
+      } message: {
+        Text("Are you sure you want to permanently delete these items? This action cannot be undone.")
+      }
+    }
   }
+}
+}
 }
 
 private struct ScoreBadge: View {
@@ -562,19 +550,34 @@ private struct ScoreBadge: View {
 }
 
 private struct ResultsCard: View {
-  let items: [CleanupFinding]
-  @State private var displayCount: Int = 100
+let items: [CleanupFinding]
+@State private var displayCount: Int = 100
+@EnvironmentObject var scanStore: ScanStore
 
-  var body: some View {
-    MacPanel(tint: Palette.ink, style: .dark) {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack(spacing: 10) {
-          Image(systemName: "sparkles.rectangle.stack.fill")
-            .foregroundStyle(Palette.sand)
-          Text("\(items.count)")
-            .font(.system(size: 30, weight: .bold, design: .serif))
-            .foregroundStyle(Palette.alabaster)
+var body: some View {
+MacPanel(tint: Palette.ink, style: .dark) {
+  VStack(alignment: .leading, spacing: 12) {
+    HStack(spacing: 10) {
+      Image(systemName: "sparkles.rectangle.stack.fill")
+        .foregroundStyle(Palette.sand)
+      Text("\(items.count)")
+        .font(.system(size: 30, weight: .bold, design: .serif))
+        .foregroundStyle(Palette.alabaster)
+        
+      Spacer()
+      
+      Button {
+        if scanStore.selectedFindingIDs.count == items.count {
+          scanStore.selectedFindingIDs.removeAll()
+        } else {
+          scanStore.selectedFindingIDs = Set(items.map { $0.id })
         }
+      } label: {
+        Text(scanStore.selectedFindingIDs.count == items.count ? "Deselect All" : "Select All")
+          .font(.system(size: 14, weight: .semibold, design: .rounded))
+      }
+      .buttonStyle(LuxurySecondaryButtonStyle())
+    }
 
         if items.isEmpty {
           Text("No cleanup findings detected in the selected folders.")
@@ -623,21 +626,35 @@ private struct ResultsCard: View {
 }
 
 private struct FindingRow: View {
-  let item: CleanupFinding
+let item: CleanupFinding
+@EnvironmentObject var scanStore: ScanStore
 
-  var body: some View {
-    MacPanel(tint: Palette.canvas, style: .dark) {
-      HStack(alignment: .top, spacing: 12) {
-        ZStack {
-          RoundedRectangle(cornerRadius: 14)
-            .fill(colorForCategory(item.category).opacity(0.16))
-            .frame(width: 44, height: 44)
-          Image(systemName: iconName(for: item.category))
-            .foregroundColor(colorForCategory(item.category))
-        }
+var body: some View {
+MacPanel(tint: Palette.canvas, style: .dark) {
+  HStack(alignment: .top, spacing: 12) {
+    Button {
+      withAnimation(.easeInOut(duration: 0.2)) {
+        scanStore.toggleSelection(for: item.id)
+      }
+    } label: {
+      Image(systemName: scanStore.selectedFindingIDs.contains(item.id) ? "checkmark.circle.fill" : "circle")
+        .font(.system(size: 24))
+        .foregroundColor(scanStore.selectedFindingIDs.contains(item.id) ? Palette.amber : Palette.smoke.opacity(0.3))
+    }
+    .buttonStyle(.plain)
+    .padding(.top, 10)
+    .accessibilityLabel("Toggle selection")
 
-        VStack(alignment: .leading, spacing: 8) {
-          HStack(spacing: 8) {
+    ZStack {
+      RoundedRectangle(cornerRadius: 14)
+        .fill(colorForCategory(item.category).opacity(0.16))
+        .frame(width: 44, height: 44)
+      Image(systemName: iconName(for: item.category))
+        .foregroundColor(colorForCategory(item.category))
+    }
+
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 8) {
             IconPill(systemName: iconName(for: item.category), accent: colorForCategory(item.category))
             IconPill(systemName: scannerIconName(item.sourceScanner), accent: Palette.sea)
           }
@@ -1151,31 +1168,21 @@ private struct FlowLayout: Layout {
 
 @MainActor
 final class ScanStore: ObservableObject {
-  @Published var selectedRoots: [URL]
-  @Published var isScanning: Bool = false
-  @Published var status: String = "Ready"
-  @Published var lastReport: CleanupScanReport?
+@Published var selectedRoots: [URL] = [URL(fileURLWithPath: "/Users")]
+@Published var isScanning: Bool = false
+@Published var isCleaning: Bool = false
+@Published var status: String = "Ready"
+@Published var lastReport: CleanupScanReport?
+@Published var selectedFindingIDs: Set<String> = []
 
-  init() {
-    selectedRoots = ScanRootBookmarkStore.loadURLs()
-  }
+  init() {}
 
-  var canScan: Bool {
-    !selectedRoots.isEmpty
-  }
+  var canScan: Bool { true }
 
   func scan() {
     guard !isScanning else { return }
 
-    guard !selectedRoots.isEmpty else {
-      status = "Select at least one folder to scan."
-      return
-    }
-
-    let parsedRoots = selectedRoots
-      .map { $0.standardizedFileURL.path }
-      .filter { !$0.isEmpty }
-    let scanRoots = selectedRoots
+    let parsedRoots = ["/Users"]
 
     let options = CleanupScanOptions(
       roots: parsedRoots,
@@ -1184,81 +1191,97 @@ final class ScanStore: ObservableObject {
     )
 
     isScanning = true
-    status = "Starting scan..."
+    status = "Starting full system scan..."
     lastReport = nil
 
     Task {
-      var grantedRoots: [URL] = []
-      var deniedRoots: [String] = []
-
-      for root in scanRoots {
-        if root.startAccessingSecurityScopedResource() {
-          grantedRoots.append(root)
-        } else {
-          deniedRoots.append(root.path)
-        }
-      }
-
-      if !deniedRoots.isEmpty {
-        let denied = deniedRoots.joined(separator: ", ")
-        self.status = "Cannot access \(denied). Re-add folder from picker."
-        self.isScanning = false
-        return
-      }
-
       let report = await Self.performScan(options: options)
 
-      for root in grantedRoots {
-        root.stopAccessingSecurityScopedResource()
-      }
-
       let reclaimable = formattedByteCount(report.totalEstimatedBytes)
-      self.lastReport = report
-      self.isScanning = false
-      self.status = "Completed in \(report.elapsedMs)ms. Found \(report.summary.total) cleanup item(s): \(report.summary.high) high, \(report.summary.medium) medium, \(report.summary.low) low, \(reclaimable) reclaimable."
-    }
+    
+    // Auto-select findings that are deemed safe
+    let preselected = report.items.filter { $0.safetyLevel == .safeWithConfirmation }.map { $0.id }
+    self.selectedFindingIDs = Set(preselected)
+    
+    self.lastReport = report
+    self.isScanning = false
+    self.status = "Completed in \(report.elapsedMs)ms. Found \(report.summary.total) cleanup item(s): \(report.summary.high) high, \(report.summary.medium) medium, \(report.summary.low) low, \(reclaimable) reclaimable."
   }
+}
 
-  private static nonisolated func performScan(options: CleanupScanOptions) async -> CleanupScanReport {
-    CleanupEngine().scanReport(options: options)
+func toggleSelection(for id: String) {
+  if selectedFindingIDs.contains(id) {
+    selectedFindingIDs.remove(id)
+  } else {
+    selectedFindingIDs.insert(id)
   }
+}
 
-  func addScanRoots() {
-    let panel = NSOpenPanel()
-    panel.message = "Choose folders that Mac Cleaner can scan"
-    panel.prompt = "Add"
-    panel.canChooseFiles = false
-    panel.canChooseDirectories = true
-    panel.allowsMultipleSelection = true
+func cleanSelected() {
+  guard let report = lastReport, !selectedFindingIDs.isEmpty else { return }
+  
+  isCleaning = true
+  status = "Deleting selected files..."
+  
+  let selectedIDsCopy = selectedFindingIDs
+  let currentReport = report
+  
+  DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+    let fileManager = FileManager.default
+    var bytesFreed: Int64 = 0
+    var itemsRemoved = 0
 
-    if panel.runModal() == .OK {
-      let merged = selectedRoots + panel.urls.map(\.standardizedFileURL)
-      var unique: [URL] = []
-      var seen = Set<String>()
-      for item in merged {
-        let path = item.standardizedFileURL.path
-        if seen.insert(path).inserted {
-          unique.append(item.standardizedFileURL)
+    let targetsToClean = currentReport.items.filter { selectedIDsCopy.contains($0.id) }
+
+    for item in targetsToClean {
+      if item.category == .trash {
+        let script = "tell application \"Finder\" to empty trash"
+        var error: NSDictionary?
+        if let appleScript = NSAppleScript(source: script) {
+            appleScript.executeAndReturnError(&error)
+        }
+        bytesFreed += item.estimatedBytes
+        itemsRemoved += item.cleanupTargets.count
+        continue
+      }
+      
+      let basePath = URL(fileURLWithPath: item.path)
+      for target in item.cleanupTargets {
+        let targetURL = basePath.appendingPathComponent(target.relativePath)
+        do {
+          if fileManager.fileExists(atPath: targetURL.path) {
+            try fileManager.removeItem(at: targetURL)
+            itemsRemoved += 1
+          }
+        } catch {
+          print("Mac Cleaner Error: Failed to remove \(targetURL.path) - \(error.localizedDescription)")
         }
       }
-      selectedRoots = unique
-      ScanRootBookmarkStore.save(urls: unique)
+      bytesFreed += item.estimatedBytes
+    }
+
+    DispatchQueue.main.async {
+      self?.isCleaning = false
+      let successMessage = "Successfully freed \(formattedByteCount(bytesFreed)) from \(itemsRemoved) target(s). Rescan to view updated findings."
+      self?.status = successMessage
+      self?.selectedFindingIDs.removeAll()
+      
+      let remainingItems = currentReport.items.filter { !selectedIDsCopy.contains($0.id) }
+      self?.lastReport = CleanupScanReport(
+        scanId: currentReport.scanId,
+        scannedAt: currentReport.scannedAt,
+        scannedRoots: currentReport.scannedRoots,
+        minimumConfidence: currentReport.minimumConfidence,
+        maxDepth: currentReport.maxDepth,
+        elapsedMs: currentReport.elapsedMs,
+        scannerCount: currentReport.scannerCount,
+        items: remainingItems
+      )
     }
   }
+}
 
-  func removeSelectedRoot(_ url: URL) {
-    selectedRoots.removeAll {
-      $0.standardizedFileURL.path == url.standardizedFileURL.path
-    }
-    if selectedRoots.isEmpty {
-      ScanRootBookmarkStore.clear()
-    } else {
-      ScanRootBookmarkStore.save(urls: selectedRoots)
-    }
-  }
-
-  func clearScanRoots() {
-    selectedRoots = []
-    ScanRootBookmarkStore.clear()
+private static nonisolated func performScan(options: CleanupScanOptions) async -> CleanupScanReport {
+    CleanupEngine().scanReport(options: options)
   }
 }
