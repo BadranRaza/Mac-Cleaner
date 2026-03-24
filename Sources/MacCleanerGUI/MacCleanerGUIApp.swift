@@ -561,6 +561,7 @@ private struct ScoreBadge: View {
 
 private struct ResultsCard: View {
   let items: [CleanupFinding]
+  @State private var displayCount: Int = 100
 
   var body: some View {
     MacPanel(tint: Palette.ink, style: .dark) {
@@ -580,18 +581,41 @@ private struct ResultsCard: View {
             .padding(.vertical, 8)
         } else {
           LazyVStack(spacing: 14) {
-            ForEach(items.prefix(500), id: \.id) { item in
+            ForEach(items.prefix(displayCount), id: \.id) { item in
               FindingRow(item: item)
             }
           }
-          if items.count > 500 {
-            Text("Showing top 500 largest findings out of \(items.count) total.")
+
+          if items.count > displayCount {
+            HStack {
+              Spacer()
+              Button {
+                withAnimation {
+                  displayCount += 100
+                }
+              } label: {
+                Text("Load More")
+                  .font(.system(size: 14, weight: .semibold, design: .rounded))
+                  .padding(.horizontal, 16)
+                  .padding(.vertical, 8)
+              }
+              .buttonStyle(LuxurySecondaryButtonStyle())
+              Spacer()
+            }
+            .padding(.top, 14)
+
+            Text("Showing \(displayCount) of \(items.count) findings")
               .font(.system(size: 13, weight: .regular, design: .rounded))
               .foregroundStyle(Palette.smoke)
-              .padding(.top, 10)
+              .frame(maxWidth: .infinity, alignment: .center)
+              .padding(.top, 4)
           }
         }
       }
+    }
+    // Reset pagination when scan results change
+    .onChange(of: items.first?.id) { _ in
+      displayCount = 100
     }
   }
 }
