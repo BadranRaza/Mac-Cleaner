@@ -579,10 +579,16 @@ private struct ResultsCard: View {
             .foregroundStyle(Palette.smoke)
             .padding(.vertical, 8)
         } else {
-          VStack(spacing: 14) {
-            ForEach(items, id: \.id) { item in
+          LazyVStack(spacing: 14) {
+            ForEach(items.prefix(500), id: \.id) { item in
               FindingRow(item: item)
             }
+          }
+          if items.count > 500 {
+            Text("Showing top 500 largest findings out of \(items.count) total.")
+              .font(.system(size: 13, weight: .regular, design: .rounded))
+              .foregroundStyle(Palette.smoke)
+              .padding(.top, 10)
           }
         }
       }
