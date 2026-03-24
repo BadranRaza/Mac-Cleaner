@@ -34,20 +34,17 @@ public struct UnityProjectDetectorOptions {
   public let roots: [String]
   public let minimumConfidence: Int
   public let maxDepth: Int?
-  public let skipHiddenDirectories: Bool
   public let followSymlinks: Bool
 
   public init(
     roots: [String] = [],
     minimumConfidence: Int = 6,
     maxDepth: Int? = nil,
-    skipHiddenDirectories: Bool = true,
     followSymlinks: Bool = false
   ) {
     self.roots = roots
     self.minimumConfidence = minimumConfidence
     self.maxDepth = maxDepth
-    self.skipHiddenDirectories = skipHiddenDirectories
     self.followSymlinks = followSymlinks
   }
 
@@ -159,7 +156,7 @@ public final class UnityProjectDetector {
     guard let childItems = try? fileManager.contentsOfDirectory(
       at: directory,
       includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey],
-      options: options.skipHiddenDirectories ? [.skipsHiddenFiles] : []
+      options: []
     ) else {
       return
     }
@@ -167,7 +164,7 @@ public final class UnityProjectDetector {
     for item in childItems {
       let name = item.lastPathComponent
 
-      if options.skipHiddenDirectories && shouldSkipName(name) {
+      if shouldSkipName(name) {
         continue
       }
 
@@ -299,7 +296,7 @@ public final class UnityProjectDetector {
   private func shouldSkip(_ url: URL, options: UnityProjectDetectorOptions) -> Bool {
     let path = url.path
 
-    if options.skipHiddenDirectories && isHiddenPath(path) {
+    if isHiddenPath(path) {
       return true
     }
 

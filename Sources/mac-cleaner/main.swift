@@ -3,11 +3,10 @@ import MacCleanerCore
 
 let arguments = CommandLine.arguments.dropFirst()
 let printJSON = arguments.contains("--json")
-let includeHidden = arguments.contains("--include-hidden")
 let followSymlinks = arguments.contains("--follow-symlinks")
 
 let roots: [String] = arguments.compactMap { arg in
-  if arg == "--json" || arg == "--include-hidden" || arg == "--follow-symlinks" || arg.hasPrefix("--max-depth=") || arg.hasPrefix("--minimum-confidence=") {
+  if arg == "--json" || arg == "--follow-symlinks" || arg.hasPrefix("--max-depth=") || arg.hasPrefix("--minimum-confidence=") {
     return nil
   }
 
@@ -32,7 +31,6 @@ let options = CleanupScanOptions(
   roots: roots.isEmpty ? [FileManager.default.currentDirectoryPath] : roots,
   minimumConfidence: minimumConfidence ?? 6,
   maxDepth: maxDepth,
-  skipHiddenDirectories: !includeHidden,
   followSymlinks: followSymlinks
 )
 
@@ -59,19 +57,20 @@ if printJSON {
   exit(0)
 }
 
-let total = report.summary["total", default: 0]
-if total == 0 {
+if report.summary.total == 0 {
   print("No cleanup findings detected.")
   exit(0)
 }
 
-print("Detected \(total) cleanup finding(s):")
+print("Detected \(report.summary.total) cleanup finding(s):")
+print("Potential reclaimable: \(ByteCountFormatter.string(fromByteCount: report.totalEstimatedBytes, countStyle: .file))")
 for item in report.items {
   let cleanupTargets = item.cleanupTargets.map(\.name).joined(separator: ", ")
   print("- \(item.title) [\(item.subtitle)]")
   print("  path: \(item.path)")
   print("  scanner: \(item.sourceScanner)")
   print("  confidence: \(item.confidenceScore) (\(item.confidenceBand.rawValue))")
+  print("  reclaimable: \(ByteCountFormatter.string(fromByteCount: item.estimatedBytes, countStyle: .file))")
   if let metadata = item.metadata {
     print("  details: \(metadata)")
   }

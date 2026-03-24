@@ -1,25 +1,9 @@
 import Foundation
 
-public enum UnityProjectConfidenceBand: String, Codable {
-  case low
-  case medium
-  case high
-
-  public static func fromScore(_ score: Int) -> UnityProjectConfidenceBand {
-    switch score {
-    case 0..<7:
-      return .low
-    case 7...9:
-      return .medium
-    default:
-      return .high
-    }
-  }
-}
-
 public extension UnityProjectCandidate {
-  var confidenceBand: UnityProjectConfidenceBand {
-    UnityProjectConfidenceBand.fromScore(confidence)
+  /// Reuses the shared `CleanupConfidenceBand` — single source of truth for band logic.
+  var confidenceBand: CleanupConfidenceBand {
+    CleanupConfidenceBand.fromScore(confidence)
   }
 
   var recommendedCleanupAction: String {
@@ -38,7 +22,7 @@ public struct UnityProjectDetectionItem: Codable, Equatable {
   public let id: String
   public let path: String
   public let confidenceScore: Int
-  public let confidenceBand: UnityProjectConfidenceBand
+  public let confidenceBand: CleanupConfidenceBand
   public let detectedBy: [String]
   public let unityVersion: String?
   public let detectedAt: Date
@@ -66,7 +50,7 @@ public struct UnityProjectDetectionReport: Codable, Equatable {
   public let maxDepth: Int?
   public let elapsedMs: Int
   public let items: [UnityProjectDetectionItem]
-  public let summary: [String: Int]
+  public let summary: ConfidenceSummary
 
   public init(scanId: String, scannedAt: Date, scannedRoots: [String], minimumConfidence: Int, maxDepth: Int?, elapsedMs: Int, items: [UnityProjectDetectionItem]) {
     self.scanId = scanId
@@ -76,12 +60,11 @@ public struct UnityProjectDetectionReport: Codable, Equatable {
     self.maxDepth = maxDepth
     self.elapsedMs = elapsedMs
     self.items = items
-    self.summary = [
-      "high": items.filter { $0.confidenceBand == .high }.count,
-      "medium": items.filter { $0.confidenceBand == .medium }.count,
-      "low": items.filter { $0.confidenceBand == .low }.count,
-      "total": items.count
-    ]
+    self.summary = ConfidenceSummary(
+      high: items.filter { $0.confidenceBand == .high }.count,
+      medium: items.filter { $0.confidenceBand == .medium }.count,
+      low: items.filter { $0.confidenceBand == .low }.count,
+      total: items.count
+    )
   }
 }
-

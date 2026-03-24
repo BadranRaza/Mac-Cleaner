@@ -4,6 +4,7 @@ Mac Cleaner is a macOS cleanup tool built in Swift. The app is moving toward a g
 
 Current scanners:
 - Unity project scanner
+- Xcode `DerivedData` and `Archives` scanner
 
 Available products:
 - `mac-cleaner`: general cleanup CLI that emits generic cleanup findings
