@@ -27,43 +27,7 @@ jobs:
       - name: Build Universal Binaries
         run: swift build -c release --arch arm64 --arch x86_64
 
-      - name: Validate release signing secrets
-        env:
-          MAC_CLEANER_DEVELOPER_ID_P12_BASE64: ${{ secrets.MAC_CLEANER_DEVELOPER_ID_P12_BASE64 }}
-          MAC_CLEANER_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MAC_CLEANER_DEVELOPER_ID_P12_PASSWORD }}
-          MAC_CLEANER_DEVELOPER_ID_APPLICATION: ${{ secrets.MAC_CLEANER_DEVELOPER_ID_APPLICATION }}
-          MAC_CLEANER_NOTARY_KEY_ID: ${{ secrets.MAC_CLEANER_NOTARY_KEY_ID }}
-          MAC_CLEANER_NOTARY_ISSUER_ID: ${{ secrets.MAC_CLEANER_NOTARY_ISSUER_ID }}
-          MAC_CLEANER_NOTARY_API_KEY_P8_BASE64: ${{ secrets.MAC_CLEANER_NOTARY_API_KEY_P8_BASE64 }}
-        run: |
-          set -euo pipefail
-
-          missing=()
-          for key in \
-            MAC_CLEANER_DEVELOPER_ID_P12_BASE64 \
-            MAC_CLEANER_DEVELOPER_ID_P12_PASSWORD \
-            MAC_CLEANER_DEVELOPER_ID_APPLICATION \
-            MAC_CLEANER_NOTARY_KEY_ID \
-            MAC_CLEANER_NOTARY_ISSUER_ID \
-            MAC_CLEANER_NOTARY_API_KEY_P8_BASE64; do
-            if [[ -z "${!key:-}" ]]; then
-              missing+=("$key")
-            fi
-          done
-
-          if (( ${#missing[@]} > 0 )); then
-            echo "Missing required release secrets: ${missing[*]}"
-            exit 1
-          fi
-
-      - name: Package, sign, and notarize release
-        env:
-          MAC_CLEANER_DEVELOPER_ID_P12_BASE64: ${{ secrets.MAC_CLEANER_DEVELOPER_ID_P12_BASE64 }}
-          MAC_CLEANER_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MAC_CLEANER_DEVELOPER_ID_P12_PASSWORD }}
-          MAC_CLEANER_DEVELOPER_ID_APPLICATION: ${{ secrets.MAC_CLEANER_DEVELOPER_ID_APPLICATION }}
-          MAC_CLEANER_NOTARY_KEY_ID: ${{ secrets.MAC_CLEANER_NOTARY_KEY_ID }}
-          MAC_CLEANER_NOTARY_ISSUER_ID: ${{ secrets.MAC_CLEANER_NOTARY_ISSUER_ID }}
-          MAC_CLEANER_NOTARY_API_KEY_P8_BASE64: ${{ secrets.MAC_CLEANER_NOTARY_API_KEY_P8_BASE64 }}
+      - name: Package release
         run: |
           set -euo pipefail
 
@@ -71,26 +35,11 @@ jobs:
           APP_PATH="Reclaim.app"
           RELEASE_DIR="Reclaim-Release-$VERSION"
           RELEASE_ZIP="Reclaim-${GITHUB_REF_NAME}.zip"
-          NOTARY_ZIP="$RUNNER_TEMP/Reclaim-notary-${VERSION}.zip"
           EXECUTABLE_PATH=".build/apple/Products/Release/MacCleanerGUI"
           MAC_CLEANER_CLI_PATH=".build/apple/Products/Release/mac-cleaner"
           UNITY_DETECTOR_CLI_PATH=".build/apple/Products/Release/unity-detector"
-          CERT_PATH="$RUNNER_TEMP/mac-cleaner-developer-id.p12"
-          NOTARY_KEY_PATH="$RUNNER_TEMP/mac-cleaner-notary-key.p8"
-          KEYCHAIN_PATH="$RUNNER_TEMP/mac-cleaner-signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
-          
-          printf '%s' "$MAC_CLEANER_DEVELOPER_ID_P12_BASE64" | base64 --decode > "$CERT_PATH"
-          printf '%s' "$MAC_CLEANER_NOTARY_API_KEY_P8_BASE64" | base64 --decode > "$NOTARY_KEY_PATH"
 
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$MAC_CLEANER_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
-          security list-keychains -d user -s "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          rm -rf "$APP_PATH" "$RELEASE_DIR" "$RELEASE_ZIP" "$NOTARY_ZIP"
+          rm -rf "$APP_PATH" "$RELEASE_DIR" "$RELEASE_ZIP"
           mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
           
           cat > "$APP_PATH/Contents/Info.plist" <<EOF
@@ -132,26 +81,7 @@ jobs:
           mv "$APP_PATH" "$RELEASE_DIR/"
           cp "$MAC_CLEANER_CLI_PATH" "$RELEASE_DIR/"
           cp "$UNITY_DETECTOR_CLI_PATH" "$RELEASE_DIR/"
-
-          codesign --force --timestamp --options runtime --sign "$MAC_CLEANER_DEVELOPER_ID_APPLICATION" "$RELEASE_DIR/mac-cleaner"
-          codesign --force --timestamp --options runtime --sign "$MAC_CLEANER_DEVELOPER_ID_APPLICATION" "$RELEASE_DIR/unity-detector"
-          codesign --force --timestamp --options runtime --sign "$MAC_CLEANER_DEVELOPER_ID_APPLICATION" "$RELEASE_DIR/Reclaim.app"
-
-          codesign --verify --verbose=2 "$RELEASE_DIR/mac-cleaner"
-          codesign --verify --verbose=2 "$RELEASE_DIR/unity-detector"
-          codesign --verify --deep --strict --verbose=2 "$RELEASE_DIR/Reclaim.app"
-
-          ditto -c -k --sequesterRsrc --keepParent "$RELEASE_DIR" "$NOTARY_ZIP"
-          xcrun notarytool submit "$NOTARY_ZIP" \
-            --key "$NOTARY_KEY_PATH" \
-            --key-id "$MAC_CLEANER_NOTARY_KEY_ID" \
-            --issuer "$MAC_CLEANER_NOTARY_ISSUER_ID" \
-            --wait
-
-          xcrun stapler staple "$RELEASE_DIR/Reclaim.app"
-          spctl -a -vv "$RELEASE_DIR/Reclaim.app"
           
-          # Compress the final stapled release folder
           ditto -c -k --sequesterRsrc --keepParent "$RELEASE_DIR" "$RELEASE_ZIP"
 
       - name: Create Release

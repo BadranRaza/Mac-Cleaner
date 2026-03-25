@@ -24,4 +24,4 @@ Current implementation status:
 - ❌ Current desktop build is not App Store compatible because it performs a system-wide `/Users` scan.
 - ⚠️ A separate App Store variant would need folder pickers, security-scoped access, and sandbox-constrained scanning restored.
 - ⚠️ The existing entitlements plist is dormant and not wired into the SwiftPM desktop release build.
-- ⚠️ Remaining work: create a real Xcode app target for the App Store variant, then finish signing and notarization for the desktop release path.
+- ⚠️ Remaining work: create a real Xcode app target for the App Store variant. The current GitHub desktop release path remains an unsigned direct download.
