@@ -20,9 +20,9 @@ Reclaim is an open-source macOS cleanup tool built natively in Swift. The app us
 2. Download the latest `Reclaim-vX.Y.Z.zip`.
 3. Unzip the file and drag the provided `Reclaim.app` to your `/Applications` folder.
 4. If macOS warns that Apple cannot verify the app, right-click `Reclaim.app`, choose `Open`, and confirm once.
-5. After launch, grant `Reclaim.app` access in `System Settings > Privacy & Security > Full Disk Access`.
+5. After launch, optionally grant `Reclaim.app` access in `System Settings > Privacy & Security > Full Disk Access` for the broadest scan coverage.
 
-> Note: The GUI performs a system-wide scan across `/Users`, so Full Disk Access is required to avoid repeated privacy prompts while scanning protected folders such as Mail, Safari, Desktop, Documents, and Downloads.
+> Note: The GUI performs a system-wide scan across `/Users`. Without Full Disk Access, Reclaim still runs in a best-effort mode, but protected folders such as Mail, Safari, Desktop, Documents, and Downloads may be skipped.
 
 > Note: The zip file also conveniently contains the standalone `mac-cleaner` and `unity-detector` command-line utilities inside the same extracted folder, ready to be used from your terminal if preferred.
 

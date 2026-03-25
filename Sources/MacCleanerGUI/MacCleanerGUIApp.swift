@@ -103,7 +103,7 @@ private struct ContentView: View {
       if scanStore.isScanning {
         ProgressPanel()
           .transition(.opacity.combined(with: .move(edge: .top)))
-      } else if scanStore.lastReport == nil && scanStore.status != "Ready" && scanStore.hasFullDiskAccess {
+      } else if scanStore.lastReport == nil && scanStore.status != "Ready" {
         StatusCard(status: scanStore.status)
       }
     }
@@ -269,9 +269,9 @@ private struct HeroCard: View {
             .foregroundStyle(Palette.smoke)
 
           IconPill(
-            systemName: fullDiskAccessStatus == .granted ? "checkmark.shield.fill" : "lock.shield.fill",
-            value: fullDiskAccessStatus == .granted ? "System-Wide Ready" : "Access Required",
-            accent: fullDiskAccessStatus == .granted ? Palette.sage : Palette.coral
+            systemName: fullDiskAccessStatus == .granted ? "checkmark.shield.fill" : "exclamationmark.shield.fill",
+            value: fullDiskAccessStatus == .granted ? "System-Wide Ready" : "Best-Effort Mode",
+            accent: fullDiskAccessStatus == .granted ? Palette.sage : Palette.amber
           )
         }
 
@@ -364,15 +364,15 @@ private struct IdleOverviewCard: View {
   private var lockedState: some View {
     VStack(alignment: .leading, spacing: 22) {
       HStack(spacing: 10) {
-        Image(systemName: "lock.shield.fill")
+        Image(systemName: "exclamationmark.shield.fill")
           .font(.system(size: 20, weight: .semibold))
-          .foregroundStyle(Palette.coral)
-        Text("Full Disk Access")
+          .foregroundStyle(Palette.amber)
+        Text("Best-Effort Scan")
           .font(.system(size: 34, weight: .bold, design: .serif))
           .foregroundStyle(Palette.alabaster)
       }
 
-      Text("Reclaim scans every user profile under /Users. macOS protects Mail, Messages, Safari, Desktop, Documents, Downloads, and similar folders, so the app waits for Full Disk Access before starting the scan.")
+      Text("Reclaim can still scan every user profile under /Users, but without Full Disk Access macOS may hide Mail, Messages, Safari, Desktop, Documents, Downloads, and similar folders. Granting Full Disk Access improves coverage, but it is no longer required to start the scan.")
         .font(.system(size: 15, weight: .regular, design: .rounded))
         .foregroundStyle(Palette.smoke)
         .fixedSize(horizontal: false, vertical: true)
@@ -385,11 +385,18 @@ private struct IdleOverviewCard: View {
 
       HStack(spacing: 14) {
         Button {
+          scanStore.scan()
+        } label: {
+          Text("Scan Anyway")
+        }
+        .buttonStyle(LuxuryPrimaryButtonStyle())
+
+        Button {
           scanStore.openFullDiskAccessSettings()
         } label: {
           Text("Open Settings")
         }
-        .buttonStyle(LuxuryPrimaryButtonStyle())
+        .buttonStyle(LuxurySecondaryButtonStyle())
 
         Button {
           scanStore.refreshFullDiskAccessStatus(forceStatusMessage: true)
@@ -402,9 +409,9 @@ private struct IdleOverviewCard: View {
       Spacer(minLength: 0)
 
       HStack(spacing: 14) {
-        CapabilityTile(systemName: "lock.shield.fill", title: "Protected Data", accent: Palette.coral)
         CapabilityTile(systemName: "externaldrive.fill", title: "System-Wide", accent: Palette.sand)
-        CapabilityTile(systemName: "checkmark.seal.fill", title: "One-Time Grant", accent: Palette.sage)
+        CapabilityTile(systemName: "exclamationmark.shield.fill", title: "Some Folders Skipped", accent: Palette.amber)
+        CapabilityTile(systemName: "checkmark.seal.fill", title: "Grant For More", accent: Palette.sage)
       }
     }
   }
@@ -428,7 +435,7 @@ private struct ScanControlCard: View {
           
         Text(scanStore.hasFullDiskAccess
           ? "Analyzes all user profiles under /Users for hidden caches, logs, developer leftovers, and trash."
-          : "Grant Full Disk Access once so Reclaim can inspect protected folders without repeated permission pop-ups.")
+          : "Runs a best-effort scan across /Users. Protected folders may be skipped until Full Disk Access is granted.")
           .font(.system(size: 14, weight: .regular, design: .rounded))
           .foregroundStyle(Palette.smoke)
           .multilineTextAlignment(.center)
@@ -438,8 +445,8 @@ private struct ScanControlCard: View {
           scanStore.handlePrimaryAction()
         } label: {
           HStack(spacing: 12) {
-            Image(systemName: scanStore.isScanning ? "hourglass" : (scanStore.hasFullDiskAccess ? "magnifyingglass" : "lock.open.fill"))
-            Text(scanStore.isScanning ? "Scanning..." : (scanStore.hasFullDiskAccess ? "Start Full Scan" : "Open Full Disk Access"))
+            Image(systemName: scanStore.isScanning ? "hourglass" : "magnifyingglass")
+            Text(scanStore.isScanning ? "Scanning..." : "Start Scan")
           }
           .font(.system(size: 18, weight: .semibold, design: .rounded))
           .frame(maxWidth: .infinity)
@@ -1254,11 +1261,7 @@ final class ScanStore: ObservableObject {
   var hasFullDiskAccess: Bool { fullDiskAccessStatus == .granted }
 
   func handlePrimaryAction() {
-    if hasFullDiskAccess {
-      scan()
-    } else {
-      openFullDiskAccessSettings()
-    }
+    scan()
   }
 
   func openFullDiskAccessSettings() {
@@ -1281,7 +1284,7 @@ final class ScanStore: ObservableObject {
 
     switch nextStatus {
     case .granted:
-      status = "Full Disk Access detected. Ready for system-wide scan."
+      status = "Full Disk Access detected. Ready for the broadest system-wide scan."
     case .missing:
       status = FullDiskAccess.missingStatusMessage
     }
@@ -1289,10 +1292,6 @@ final class ScanStore: ObservableObject {
 
   func scan() {
     guard !isScanning else { return }
-    guard hasFullDiskAccess else {
-      status = FullDiskAccess.missingStatusMessage
-      return
-    }
 
     let options = CleanupScanOptions(
       roots: scanRoots,
@@ -1301,7 +1300,10 @@ final class ScanStore: ObservableObject {
     )
 
     isScanning = true
-    status = "Scanning /Users with system-wide access..."
+    let fullDiskAccessGranted = hasFullDiskAccess
+    status = fullDiskAccessGranted
+      ? "Scanning /Users with Full Disk Access..."
+      : "Scanning /Users in best-effort mode. Protected folders may be skipped."
     lastReport = nil
 
     Task {
@@ -1315,7 +1317,8 @@ final class ScanStore: ObservableObject {
     
     self.lastReport = report
     self.isScanning = false
-    self.status = "Completed in \(report.elapsedMs)ms. Found \(report.summary.total) cleanup item(s): \(report.summary.high) high, \(report.summary.medium) medium, \(report.summary.low) low, \(reclaimable) reclaimable."
+    let coverageNote = fullDiskAccessGranted ? "" : " Protected folders may have been skipped."
+    self.status = "Completed in \(report.elapsedMs)ms. Found \(report.summary.total) cleanup item(s): \(report.summary.high) high, \(report.summary.medium) medium, \(report.summary.low) low, \(reclaimable) reclaimable.\(coverageNote)"
   }
 }
 

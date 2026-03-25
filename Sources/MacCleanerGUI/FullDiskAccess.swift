@@ -8,12 +8,12 @@ enum FullDiskAccessStatus: Equatable {
 
 enum FullDiskAccess {
   static let missingStatusMessage =
-    "System-wide scans require Full Disk Access. In System Settings, open Privacy & Security > Full Disk Access, add Reclaim.app, turn it on, then return here."
+    "Full Disk Access was not detected. Reclaim can still run a best-effort scan, but protected folders may be skipped. In System Settings, open Privacy & Security > Full Disk Access, add Reclaim.app, turn it on, then return here."
 
   static let setupSteps = [
     "Open System Settings > Privacy & Security > Full Disk Access.",
     "Add Reclaim.app from your Applications folder and enable the toggle.",
-    "Return to Reclaim and start the scan again. Relaunch the app if macOS asks."
+    "Return to Reclaim and press Check Again. You can still run a best-effort scan without this access."
   ]
 
   // macOS does not expose a public Full Disk Access status API for desktop apps,
