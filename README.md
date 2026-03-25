@@ -6,7 +6,7 @@ Mac Cleaner is an open-source macOS cleanup tool built natively in Swift. The ap
 
 - **SwiftUI Interface**: Beautiful, responsive native UI built for macOS 13+.
 - **Universal Binaries**: Native support for both Apple Silicon (M-series) and Intel architectures.
-- **Safety First**: Implements App Sandbox access controls, ensuring scans stay strictly within user-granted directories.
+- **System-Wide Scan Mode**: Scans every user profile under `/Users` after you grant Full Disk Access once in macOS.
 - **Specialized Scanners**:
   - **Xcode**: Reclaim space occupied by stale `DerivedData`, outdated simulators, and iOS device logs.
   - **Unity**: Automatically detects cached builds and unnecessary library artifacts across all Unity projects.
@@ -19,6 +19,9 @@ Mac Cleaner is an open-source macOS cleanup tool built natively in Swift. The ap
 1. Navigate to the [Releases](https://github.com/BadranRaza/Mac-Cleaner/releases) section of this repository.
 2. Download the latest `MacCleaner-vX.Y.Z.zip`.
 3. Unzip the file and drag the provided `MacCleaner.app` to your `/Applications` folder.
+4. On first launch, grant `MacCleaner.app` access in `System Settings > Privacy & Security > Full Disk Access`.
+
+> Note: The GUI performs a system-wide scan across `/Users`, so Full Disk Access is required to avoid repeated privacy prompts while scanning protected folders such as Mail, Safari, Desktop, Documents, and Downloads.
 
 > Note: The zip file also conveniently contains the standalone `mac-cleaner` and `unity-detector` command-line utilities inside the same extracted folder, ready to be used from your terminal if preferred.
 
@@ -62,6 +65,8 @@ swift run unity-detector --root=. --json
 ### GUI Application Packaging
 
 The project relies on GitHub Actions to auto-release `MacCleanerGUI` natively. A `.github/workflows/release.yml` triggers when pushing new git tags (e.g., `v1.2.0`) to automatically bind the version natively and export universally compiled applications ready for download.
+
+The current GitHub release bundle is suitable for direct download testing and use, but it is not yet Developer ID signed or notarized. For the smoothest long-term Full Disk Access experience across upgrades, finish a proper signed distribution pipeline before broad public release.
 
 To launch the GUI locally during development with an auto-generated App bundle scaffold:
 

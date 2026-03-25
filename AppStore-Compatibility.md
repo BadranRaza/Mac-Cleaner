@@ -1,6 +1,8 @@
 # Mac Cleaner App — App Store compatibility checklist
 
-This SwiftUI app scans only user-selected folders and is structured so multiple cleanup scanners can run under the same permission model. To ship on the Mac App Store, complete the following checklist:
+The current GitHub release is a non-sandboxed desktop app that performs a system-wide `/Users` scan and expects Full Disk Access.
+
+This document is only for a future Mac App Store variant. Shipping on the Mac App Store would require a separate folder-scoped build that scans only user-selected locations and runs under the App Sandbox permission model.
 
 1. Build as a macOS app target (not a SwiftPM CLI distribution) and sign with an App Store Distribution certificate.
 2. Enable App Sandbox in the Xcode target entitlements.
@@ -19,8 +21,7 @@ This SwiftUI app scans only user-selected folders and is structured so multiple 
 10. Run Apple's `xcrun altool`/Validation checks for final package.
 
 Current implementation status:
-- ✅ No default `/` scan path in the GUI.
-- ✅ Folder scope is user-driven via picker.
-- ✅ Security-scoped access is requested before scanning.
-- ✅ Entitlements plist exists for sandboxed file access.
-- ⚠️ Remaining work: wire the entitlements into a real Xcode app target and finish signing/notarization.
+- ❌ Current desktop build is not App Store compatible because it performs a system-wide `/Users` scan.
+- ⚠️ A separate App Store variant would need folder pickers, security-scoped access, and sandbox-constrained scanning restored.
+- ⚠️ The existing entitlements plist is dormant and not wired into the SwiftPM desktop release build.
+- ⚠️ Remaining work: create a real Xcode app target for the App Store variant, then finish signing and notarization for the desktop release path.

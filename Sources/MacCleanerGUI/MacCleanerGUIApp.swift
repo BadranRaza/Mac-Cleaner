@@ -29,6 +29,9 @@ struct MacCleanerGUI: App {
       ContentView()
         .environmentObject(scanStore)
         .preferredColorScheme(.dark)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+          scanStore.refreshFullDiskAccessStatus()
+        }
     }
     .windowResizability(.contentSize)
     .defaultSize(width: 1180, height: 820)
@@ -52,7 +55,7 @@ private struct ContentView: View {
         VStack(spacing: 22) {
           HeroCard(
             report: scanStore.lastReport,
-            selectedRootCount: scanStore.selectedRoots.count,
+            fullDiskAccessStatus: scanStore.fullDiskAccessStatus,
             isScanning: scanStore.isScanning
           )
 
@@ -100,7 +103,7 @@ private struct ContentView: View {
       if scanStore.isScanning {
         ProgressPanel()
           .transition(.opacity.combined(with: .move(edge: .top)))
-      } else if scanStore.lastReport == nil && scanStore.status != "Ready" {
+      } else if scanStore.lastReport == nil && scanStore.status != "Ready" && scanStore.hasFullDiskAccess {
         StatusCard(status: scanStore.status)
       }
     }
@@ -250,7 +253,7 @@ private struct MacPanel<Content: View>: View {
 
 private struct HeroCard: View {
   let report: CleanupScanReport?
-  let selectedRootCount: Int
+  let fullDiskAccessStatus: FullDiskAccessStatus
   let isScanning: Bool
 
   var body: some View {
@@ -265,7 +268,11 @@ private struct HeroCard: View {
             .font(.system(size: 14, weight: .bold, design: .rounded))
             .foregroundStyle(Palette.smoke)
 
-          IconPill(systemName: "folder.fill", value: "\(selectedRootCount)", accent: Palette.sand)
+          IconPill(
+            systemName: fullDiskAccessStatus == .granted ? "checkmark.shield.fill" : "lock.shield.fill",
+            value: fullDiskAccessStatus == .granted ? "System-Wide Ready" : "Access Required",
+            accent: fullDiskAccessStatus == .granted ? Palette.sage : Palette.coral
+          )
         }
 
         Spacer(minLength: 20)
@@ -302,43 +309,103 @@ private struct HeroCard: View {
 }
 
 private struct IdleOverviewCard: View {
+  @EnvironmentObject var scanStore: ScanStore
+
   var body: some View {
     MacPanel(tint: Palette.ink, style: .dark) {
-      VStack(alignment: .leading, spacing: 22) {
-        HStack(spacing: 10) {
-          Image(systemName: "sparkles.rectangle.stack.fill")
-            .font(.system(size: 20, weight: .semibold))
-            .foregroundStyle(Palette.sand)
-          Text("First Scan")
-            .font(.system(size: 34, weight: .bold, design: .serif))
-            .foregroundStyle(Palette.alabaster)
-        }
-
-        HStack(spacing: 14) {
-          OnboardingTile(systemName: "folder.badge.plus", title: "Folders", accent: Palette.sand)
-          OnboardingTile(systemName: "slider.horizontal.3", title: "Scope", accent: Palette.sage)
-          OnboardingTile(systemName: "magnifyingglass", title: "Scan", accent: Palette.amber)
-        }
-
-        Rectangle()
-          .fill(Palette.sand.opacity(0.18))
-          .frame(height: 1)
-
-        HStack(spacing: 14) {
-          CapabilityTile(systemName: "hammer.circle.fill", title: "Xcode", accent: Palette.sand)
-          CapabilityTile(systemName: "cube.box.fill", title: "Unity", accent: Palette.sage)
-          CapabilityTile(systemName: "lock.shield.fill", title: "Scoped", accent: Palette.sea)
-        }
-
-        Spacer(minLength: 0)
-
-        HStack(spacing: 12) {
-          IconPill(systemName: "arrow.down.circle.fill", accent: Palette.sand)
-          IconPill(systemName: "eye.fill", accent: Palette.amber)
-          IconPill(systemName: "checkmark.shield.fill", accent: Palette.sage)
+      Group {
+        if scanStore.hasFullDiskAccess {
+          readyState
+        } else {
+          lockedState
         }
       }
       .frame(maxWidth: .infinity, minHeight: 470, alignment: .topLeading)
+    }
+  }
+
+  private var readyState: some View {
+    VStack(alignment: .leading, spacing: 22) {
+      HStack(spacing: 10) {
+        Image(systemName: "sparkles.rectangle.stack.fill")
+          .font(.system(size: 20, weight: .semibold))
+          .foregroundStyle(Palette.sand)
+        Text("System Scan")
+          .font(.system(size: 34, weight: .bold, design: .serif))
+          .foregroundStyle(Palette.alabaster)
+      }
+
+      HStack(spacing: 14) {
+        OnboardingTile(systemName: "checkmark.shield.fill", title: "Authorized", accent: Palette.sage)
+        OnboardingTile(systemName: "desktopcomputer", title: "All Users", accent: Palette.sand)
+        OnboardingTile(systemName: "magnifyingglass", title: "Scan", accent: Palette.amber)
+      }
+
+      Rectangle()
+        .fill(Palette.sand.opacity(0.18))
+        .frame(height: 1)
+
+      HStack(spacing: 14) {
+        CapabilityTile(systemName: "hammer.circle.fill", title: "Xcode", accent: Palette.sand)
+        CapabilityTile(systemName: "cube.box.fill", title: "Unity", accent: Palette.sage)
+        CapabilityTile(systemName: "externaldrive.fill", title: "/Users", accent: Palette.sea)
+      }
+
+      Spacer(minLength: 0)
+
+      HStack(spacing: 12) {
+        IconPill(systemName: "arrow.down.circle.fill", accent: Palette.sand)
+        IconPill(systemName: "eye.fill", accent: Palette.amber)
+        IconPill(systemName: "checkmark.shield.fill", accent: Palette.sage)
+      }
+    }
+  }
+
+  private var lockedState: some View {
+    VStack(alignment: .leading, spacing: 22) {
+      HStack(spacing: 10) {
+        Image(systemName: "lock.shield.fill")
+          .font(.system(size: 20, weight: .semibold))
+          .foregroundStyle(Palette.coral)
+        Text("Full Disk Access")
+          .font(.system(size: 34, weight: .bold, design: .serif))
+          .foregroundStyle(Palette.alabaster)
+      }
+
+      Text("Mac Cleaner scans every user profile under /Users. macOS protects Mail, Messages, Safari, Desktop, Documents, Downloads, and similar folders, so the app waits for Full Disk Access before starting the scan.")
+        .font(.system(size: 15, weight: .regular, design: .rounded))
+        .foregroundStyle(Palette.smoke)
+        .fixedSize(horizontal: false, vertical: true)
+
+      VStack(alignment: .leading, spacing: 12) {
+        ForEach(Array(FullDiskAccess.setupSteps.enumerated()), id: \.offset) { index, step in
+          PermissionStepRow(stepNumber: index + 1, text: step)
+        }
+      }
+
+      HStack(spacing: 14) {
+        Button {
+          scanStore.openFullDiskAccessSettings()
+        } label: {
+          Text("Open Settings")
+        }
+        .buttonStyle(LuxuryPrimaryButtonStyle())
+
+        Button {
+          scanStore.refreshFullDiskAccessStatus(forceStatusMessage: true)
+        } label: {
+          Text("Check Again")
+        }
+        .buttonStyle(LuxurySecondaryButtonStyle())
+      }
+
+      Spacer(minLength: 0)
+
+      HStack(spacing: 14) {
+        CapabilityTile(systemName: "lock.shield.fill", title: "Protected Data", accent: Palette.coral)
+        CapabilityTile(systemName: "externaldrive.fill", title: "System-Wide", accent: Palette.sand)
+        CapabilityTile(systemName: "checkmark.seal.fill", title: "One-Time Grant", accent: Palette.sage)
+      }
     }
   }
 }
@@ -359,18 +426,20 @@ private struct ScanControlCard: View {
           .font(.system(size: 28, weight: .bold, design: .serif))
           .foregroundStyle(Palette.alabaster)
           
-        Text("Analyzes all user profiles (e.g. /Users) for hidden caches, logs, developer leftovers, and trash.")
+        Text(scanStore.hasFullDiskAccess
+          ? "Analyzes all user profiles under /Users for hidden caches, logs, developer leftovers, and trash."
+          : "Grant Full Disk Access once so Mac Cleaner can inspect protected folders without repeated permission pop-ups.")
           .font(.system(size: 14, weight: .regular, design: .rounded))
           .foregroundStyle(Palette.smoke)
           .multilineTextAlignment(.center)
           .padding(.horizontal, 20)
 
         Button {
-          scanStore.scan()
+          scanStore.handlePrimaryAction()
         } label: {
           HStack(spacing: 12) {
-            Image(systemName: scanStore.isScanning ? "hourglass" : "magnifyingglass")
-            Text(scanStore.isScanning ? "Scanning..." : "Start Full Scan")
+            Image(systemName: scanStore.isScanning ? "hourglass" : (scanStore.hasFullDiskAccess ? "magnifyingglass" : "lock.open.fill"))
+            Text(scanStore.isScanning ? "Scanning..." : (scanStore.hasFullDiskAccess ? "Start Full Scan" : "Open Full Disk Access"))
           }
           .font(.system(size: 18, weight: .semibold, design: .rounded))
           .frame(maxWidth: .infinity)
@@ -382,32 +451,6 @@ private struct ScanControlCard: View {
         .padding(.top, 14)
       }
     }
-  }
-}
-
-private struct ScanRootRow: View {
-  let url: URL
-  let onRemove: () -> Void
-
-  var body: some View {
-    HStack(spacing: 8) {
-      Image(systemName: "folder.fill")
-        .foregroundStyle(Palette.sand)
-      Text(url.path)
-        .font(.system(size: 16, design: .monospaced))
-        .foregroundStyle(Palette.alabaster)
-        .lineLimit(1)
-      Spacer(minLength: 6)
-      Button {
-        onRemove()
-      } label: {
-        Image(systemName: "xmark.circle.fill")
-      }
-      .buttonStyle(.plain)
-      .foregroundStyle(Palette.smoke)
-      .help("Remove folder")
-    }
-    .padding(.horizontal, 6)
   }
 }
 
@@ -584,7 +627,7 @@ MacPanel(tint: Palette.ink, style: .dark) {
     }
 
         if items.isEmpty {
-          Text("No cleanup findings detected in the selected folders.")
+          Text("No cleanup findings detected in the system-wide scan.")
             .font(.system(size: 14, weight: .medium, design: .rounded))
             .foregroundStyle(Palette.smoke)
             .padding(.vertical, 8)
@@ -902,6 +945,27 @@ private struct OnboardingTile: View {
   }
 }
 
+private struct PermissionStepRow: View {
+  let stepNumber: Int
+  let text: String
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 12) {
+      Text("\(stepNumber)")
+        .font(.system(size: 13, weight: .bold, design: .rounded))
+        .foregroundStyle(Palette.alabaster)
+        .frame(width: 26, height: 26)
+        .background(Palette.sand.opacity(0.20))
+        .clipShape(Circle())
+
+      Text(text)
+        .font(.system(size: 15, weight: .medium, design: .rounded))
+        .foregroundStyle(Palette.alabaster)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+}
+
 private struct CapabilityTile: View {
   let systemName: String
   let title: String
@@ -1172,30 +1236,72 @@ private struct FlowLayout: Layout {
 
 @MainActor
 final class ScanStore: ObservableObject {
-@Published var selectedRoots: [URL] = [URL(fileURLWithPath: "/Users")]
-@Published var isScanning: Bool = false
-@Published var isCleaning: Bool = false
-@Published var status: String = "Ready"
-@Published var lastReport: CleanupScanReport?
-@Published var selectedFindingIDs: Set<String> = []
+  @Published private(set) var fullDiskAccessStatus: FullDiskAccessStatus
+  @Published var isScanning: Bool = false
+  @Published var isCleaning: Bool = false
+  @Published var status: String
+  @Published var lastReport: CleanupScanReport?
+  @Published var selectedFindingIDs: Set<String> = []
 
-  init() {}
+  private let scanRoots = ["/Users"]
 
-  var canScan: Bool { true }
+  init() {
+    let detectedStatus = FullDiskAccess.currentStatus()
+    fullDiskAccessStatus = detectedStatus
+    status = detectedStatus == .granted ? "Ready" : FullDiskAccess.missingStatusMessage
+  }
+
+  var hasFullDiskAccess: Bool { fullDiskAccessStatus == .granted }
+
+  func handlePrimaryAction() {
+    if hasFullDiskAccess {
+      scan()
+    } else {
+      openFullDiskAccessSettings()
+    }
+  }
+
+  func openFullDiskAccessSettings() {
+    status = FullDiskAccess.missingStatusMessage
+    FullDiskAccess.openSystemSettings()
+  }
+
+  func refreshFullDiskAccessStatus(forceStatusMessage: Bool = false) {
+    let previousStatus = fullDiskAccessStatus
+    let nextStatus = FullDiskAccess.currentStatus()
+    fullDiskAccessStatus = nextStatus
+
+    guard forceStatusMessage || previousStatus != nextStatus else {
+      return
+    }
+
+    guard !isScanning && !isCleaning else {
+      return
+    }
+
+    switch nextStatus {
+    case .granted:
+      status = "Full Disk Access detected. Ready for system-wide scan."
+    case .missing:
+      status = FullDiskAccess.missingStatusMessage
+    }
+  }
 
   func scan() {
     guard !isScanning else { return }
-
-    let parsedRoots = ["/Users"]
+    guard hasFullDiskAccess else {
+      status = FullDiskAccess.missingStatusMessage
+      return
+    }
 
     let options = CleanupScanOptions(
-      roots: parsedRoots,
+      roots: scanRoots,
       minimumConfidence: 6,
       maxDepth: nil
     )
 
     isScanning = true
-    status = "Starting full system scan..."
+    status = "Scanning /Users with system-wide access..."
     lastReport = nil
 
     Task {

@@ -85,6 +85,8 @@ cat > "$APP_PATH/Contents/Info.plist" <<'EOF'
     <string>13.0</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.utilities</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Mac Cleaner needs Finder access to empty the Trash when you choose trash cleanup.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
   </dict>
