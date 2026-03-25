@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build & Release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Inject Version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Setting version to: $VERSION"
+          sed -i '' "s/public static let current = \".*\"/public static let current = \"$VERSION\"/" Sources/UnityProjectDetectorCore/Version.swift
+
+      - name: Build Universal Binaries
+        run: swift build -c release --arch arm64 --arch x86_64
+
+      - name: Package Mac Cleaner App and CLIs
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          APP_PATH="MacCleaner.app"
+          EXECUTABLE_PATH=".build/apple/Products/Release/MacCleanerGUI"
+          
+          rm -rf "$APP_PATH"
+          mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
+          
+          cat > "$APP_PATH/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+            <dict>
+              <key>CFBundleDisplayName</key>
+              <string>Mac Cleaner</string>
+              <key>CFBundleExecutable</key>
+              <string>MacCleanerGUI</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.local.maccleaner.gui</string>
+              <key>CFBundleName</key>
+              <string>Mac Cleaner</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleVersion</key>
+              <string>$VERSION</string>
+              <key>CFBundleShortVersionString</key>
+              <string>$VERSION</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>13.0</string>
+              <key>LSApplicationCategoryType</key>
+              <string>public.app-category.utilities</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+            </dict>
+          </plist>
+          EOF
+          
+          cp "$EXECUTABLE_PATH" "$APP_PATH/Contents/MacOS/MacCleanerGUI"
+          chmod +x "$APP_PATH/Contents/MacOS/MacCleanerGUI"
+          zip -r "MacCleaner-${GITHUB_REF_NAME}.zip" "$APP_PATH"
+          
+          # Compress CLI executables to preserve permissions
+          zip -j "mac-cleaner-cli-${GITHUB_REF_NAME}.zip" .build/apple/Products/Release/mac-cleaner
+          zip -j "unity-detector-cli-${GITHUB_REF_NAME}.zip" .build/apple/Products/Release/unity-detector
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            MacCleaner-${{ github.ref_name }}.zip
+            mac-cleaner-cli-${{ github.ref_name }}.zip
+            unity-detector-cli-${{ github.ref_name }}.zip
+          generate_release_notes: true

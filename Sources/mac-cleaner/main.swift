@@ -2,6 +2,12 @@ import Foundation
 import MacCleanerCore
 
 let arguments = CommandLine.arguments.dropFirst()
+
+if arguments.contains("--version") {
+  print("MacCleaner v\(MacCleanerVersion.current)")
+  exit(0)
+}
+
 let printJSON = arguments.contains("--json")
 
 let roots: [String] = arguments.compactMap { arg in

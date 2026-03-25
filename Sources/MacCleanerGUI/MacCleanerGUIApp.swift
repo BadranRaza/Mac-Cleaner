@@ -261,6 +261,10 @@ private struct HeroCard: View {
             .font(.system(size: 42, weight: .bold, design: .serif))
             .foregroundStyle(Palette.alabaster)
 
+          Text("v\(MacCleanerVersion.current)")
+            .font(.system(size: 14, weight: .bold, design: .rounded))
+            .foregroundStyle(Palette.smoke)
+
           IconPill(systemName: "folder.fill", value: "\(selectedRootCount)", accent: Palette.sand)
         }
 
