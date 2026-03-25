@@ -64,17 +64,18 @@ jobs:
           
           cp "$EXECUTABLE_PATH" "$APP_PATH/Contents/MacOS/MacCleanerGUI"
           chmod +x "$APP_PATH/Contents/MacOS/MacCleanerGUI"
-          zip -r "MacCleaner-${GITHUB_REF_NAME}.zip" "$APP_PATH"
+
+          # Group everything into one release folder
+          mkdir "MacCleaner-Release-$VERSION"
+          mv "$APP_PATH" "MacCleaner-Release-$VERSION/"
+          cp .build/apple/Products/Release/mac-cleaner "MacCleaner-Release-$VERSION/"
+          cp .build/apple/Products/Release/unity-detector "MacCleaner-Release-$VERSION/"
           
-          # Compress CLI executables to preserve permissions
-          zip -j "mac-cleaner-cli-${GITHUB_REF_NAME}.zip" .build/apple/Products/Release/mac-cleaner
-          zip -j "unity-detector-cli-${GITHUB_REF_NAME}.zip" .build/apple/Products/Release/unity-detector
+          # Compress the single unified folder
+          zip -r "MacCleaner-${GITHUB_REF_NAME}.zip" "MacCleaner-Release-$VERSION"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            MacCleaner-${{ github.ref_name }}.zip
-            mac-cleaner-cli-${{ github.ref_name }}.zip
-            unity-detector-cli-${{ github.ref_name }}.zip
+          files: MacCleaner-${{ github.ref_name }}.zip
           generate_release_notes: true

@@ -18,9 +18,9 @@ Mac Cleaner is an open-source macOS cleanup tool built natively in Swift. The ap
 
 1. Navigate to the [Releases](https://github.com/BadranRaza/Mac-Cleaner/releases) section of this repository.
 2. Download the latest `MacCleaner-vX.Y.Z.zip`.
-3. Unzip and drag `MacCleaner.app` to your `/Applications` folder.
+3. Unzip the file and drag the provided `MacCleaner.app` to your `/Applications` folder.
 
-> Note: To also download lightweight command-line utilities for running scans in a terminal, download the corresponding CLI assets attached to each release (`mac-cleaner-cli-vX.Y.Z.zip` and `unity-detector-cli-vX.Y.Z.zip`).
+> Note: The zip file also conveniently contains the standalone `mac-cleaner` and `unity-detector` command-line utilities inside the same extracted folder, ready to be used from your terminal if preferred.
 
 ### Command-Line Arguments
 
