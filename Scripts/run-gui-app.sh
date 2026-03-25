@@ -48,10 +48,10 @@ swift build --product MacCleanerGUI -c "$CONFIG"
 
 if [[ "$CONFIG" == "release" ]]; then
   EXECUTABLE_PATH=".build/release/MacCleanerGUI"
-  APP_PATH=".build/MacCleanerGUI.app"
+  APP_PATH=".build/Reclaim.app"
 else
   EXECUTABLE_PATH=".build/debug/MacCleanerGUI"
-  APP_PATH=".build/MacCleanerGUI.app"
+  APP_PATH=".build/Reclaim.app"
 fi
 
 if [[ ! -x "$EXECUTABLE_PATH" ]]; then
@@ -68,13 +68,13 @@ cat > "$APP_PATH/Contents/Info.plist" <<'EOF'
 <plist version="1.0">
   <dict>
     <key>CFBundleDisplayName</key>
-    <string>Mac Cleaner</string>
+    <string>Reclaim</string>
     <key>CFBundleExecutable</key>
     <string>MacCleanerGUI</string>
     <key>CFBundleIdentifier</key>
-    <string>com.local.maccleaner.gui</string>
+    <string>com.badranraza.reclaim</string>
     <key>CFBundleName</key>
-    <string>Mac Cleaner</string>
+    <string>Reclaim</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
@@ -86,7 +86,7 @@ cat > "$APP_PATH/Contents/Info.plist" <<'EOF'
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.utilities</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Mac Cleaner needs Finder access to empty the Trash when you choose trash cleanup.</string>
+    <string>Reclaim needs Finder access to empty the Trash when you choose trash cleanup.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
   </dict>

@@ -1,4 +1,4 @@
-# Mac Cleaner App — App Store compatibility checklist
+# Reclaim App — App Store compatibility checklist
 
 The current GitHub release is a non-sandboxed desktop app that performs a system-wide `/Users` scan and expects Full Disk Access.
 

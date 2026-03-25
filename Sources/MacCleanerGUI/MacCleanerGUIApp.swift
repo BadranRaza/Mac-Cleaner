@@ -260,7 +260,7 @@ private struct HeroCard: View {
     MacPanel(tint: Palette.canvas, style: .dark) {
       HStack(alignment: .top, spacing: 24) {
         VStack(alignment: .leading, spacing: 14) {
-          Text("Mac Cleaner")
+          Text("Reclaim")
             .font(.system(size: 42, weight: .bold, design: .serif))
             .foregroundStyle(Palette.alabaster)
 
@@ -372,7 +372,7 @@ private struct IdleOverviewCard: View {
           .foregroundStyle(Palette.alabaster)
       }
 
-      Text("Mac Cleaner scans every user profile under /Users. macOS protects Mail, Messages, Safari, Desktop, Documents, Downloads, and similar folders, so the app waits for Full Disk Access before starting the scan.")
+      Text("Reclaim scans every user profile under /Users. macOS protects Mail, Messages, Safari, Desktop, Documents, Downloads, and similar folders, so the app waits for Full Disk Access before starting the scan.")
         .font(.system(size: 15, weight: .regular, design: .rounded))
         .foregroundStyle(Palette.smoke)
         .fixedSize(horizontal: false, vertical: true)
@@ -428,7 +428,7 @@ private struct ScanControlCard: View {
           
         Text(scanStore.hasFullDiskAccess
           ? "Analyzes all user profiles under /Users for hidden caches, logs, developer leftovers, and trash."
-          : "Grant Full Disk Access once so Mac Cleaner can inspect protected folders without repeated permission pop-ups.")
+          : "Grant Full Disk Access once so Reclaim can inspect protected folders without repeated permission pop-ups.")
           .font(.system(size: 14, weight: .regular, design: .rounded))
           .foregroundStyle(Palette.smoke)
           .multilineTextAlignment(.center)
@@ -1364,7 +1364,7 @@ func cleanSelected() {
             itemsRemoved += 1
           }
         } catch {
-          print("Mac Cleaner Error: Failed to remove \(targetURL.path) - \(error.localizedDescription)")
+          print("Reclaim Error: Failed to remove \(targetURL.path) - \(error.localizedDescription)")
         }
       }
       bytesFreed += item.estimatedBytes
