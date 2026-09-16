@@ -1,98 +1,53 @@
 #!/usr/bin/env zsh
-
+# Builds Reclaim.app into .build/ and opens it. Usage: Scripts/run-gui-app.sh [debug|release] [--no-open]
 set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="${SCRIPT_DIR}/.."
-cd "$PROJECT_ROOT"
+cd "$(dirname "$0")/.."
 
 CONFIG="${1:-debug}"
-case "$CONFIG" in
-  debug|release)
-    ;;
-  *)
-    echo "Usage: $0 [debug|release]"
-    exit 1
-    ;;
-esac
+[[ "$CONFIG" == debug || "$CONFIG" == release ]] || { echo "Usage: $0 [debug|release] [--no-open]"; exit 1; }
 
-SWIFTPM_CACHE_DIR="/tmp/swifttmp"
-CLANG_CACHE_DIR="/tmp/clang-cache"
+pkill -x Reclaim 2>/dev/null || true
+swift build --product Reclaim -c "$CONFIG"
 
-stop_existing_app() {
-  if ! pgrep -x "MacCleanerGUI" >/dev/null 2>&1; then
-    return
-  fi
+APP=".build/Reclaim.app"
+VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp ".build/$CONFIG/Reclaim" "$APP/Contents/MacOS/Reclaim"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
-  echo "Stopping existing MacCleanerGUI processes..."
-  pkill -TERM -x "MacCleanerGUI" || true
-
-  for _ in {1..20}; do
-    if ! pgrep -x "MacCleanerGUI" >/dev/null 2>&1; then
-      return
-    fi
-    sleep 0.1
-  done
-
-  echo "Force-stopping stubborn MacCleanerGUI processes..."
-  pkill -KILL -x "MacCleanerGUI" || true
-}
-
-stop_existing_app
-
-echo "Building MacCleanerGUI ($CONFIG)..."
-SWIFTPM_CACHE_DIR="$SWIFTPM_CACHE_DIR" \
-CLANG_MODULE_CACHE_PATH="$CLANG_CACHE_DIR" \
-SWIFT_MODULE_CACHE_PATH="$SWIFTPM_CACHE_DIR" \
-swift build --product MacCleanerGUI -c "$CONFIG"
-
-if [[ "$CONFIG" == "release" ]]; then
-  EXECUTABLE_PATH=".build/release/MacCleanerGUI"
-  APP_PATH=".build/MacCleanerGUI.app"
-else
-  EXECUTABLE_PATH=".build/debug/MacCleanerGUI"
-  APP_PATH=".build/MacCleanerGUI.app"
-fi
-
-if [[ ! -x "$EXECUTABLE_PATH" ]]; then
-  echo "Build artifact not found at $EXECUTABLE_PATH"
-  exit 1
-fi
-
-rm -rf "$APP_PATH"
-mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
-
-cat > "$APP_PATH/Contents/Info.plist" <<'EOF'
+cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-  <dict>
-    <key>CFBundleDisplayName</key>
-    <string>Mac Cleaner</string>
-    <key>CFBundleExecutable</key>
-    <string>MacCleanerGUI</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.local.maccleaner.gui</string>
-    <key>CFBundleName</key>
-    <string>Mac Cleaner</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
-    <key>LSApplicationCategoryType</key>
-    <string>public.app-category.utilities</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-  </dict>
+<dict>
+  <key>CFBundleDisplayName</key><string>Reclaim</string>
+  <key>CFBundleName</key><string>Reclaim</string>
+  <key>CFBundleExecutable</key><string>Reclaim</string>
+  <key>CFBundleIdentifier</key><string>com.autechsolutions.reclaim</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION:-1.0.0}</string>
+  <key>CFBundleVersion</key><string>$(git rev-list --count HEAD)</string>
+  <key>ReclaimGitCommit</key><string>$(git rev-parse --short HEAD)$(git diff --quiet HEAD || echo -dirty)</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
 </plist>
 EOF
 
-cp "$EXECUTABLE_PATH" "$APP_PATH/Contents/MacOS/MacCleanerGUI"
-chmod +x "$APP_PATH/Contents/MacOS/MacCleanerGUI"
+# A stable signature keeps macOS privacy grants (Full Disk Access) across rebuilds.
+# Ad-hoc signatures change every build, so macOS would ask again each time.
+# Override with RECLAIM_SIGN_IDENTITY="Apple Development: …".
+IDENTITIES="$(security find-identity -v -p codesigning)"
+SIGN_ID="${RECLAIM_SIGN_IDENTITY:-$(echo "$IDENTITIES" | grep -m1 -o '"Developer ID Application[^"]*"' | tr -d '"')}"
+SIGN_ID="${SIGN_ID:-$(echo "$IDENTITIES" | grep -m1 -o '"Apple Development[^"]*"' | tr -d '"')}"
+if [[ -n "$SIGN_ID" ]]; then
+  codesign --force --timestamp=none --sign "$SIGN_ID" "$APP"
+else
+  echo "warning: no signing identity; macOS will ask for permissions again after every build" >&2
+  codesign --force --sign - "$APP"
+fi
 
-echo "Opening $APP_PATH"
-open -n "$APP_PATH"
+[[ "${2:-}" == "--no-open" ]] || open -n "$APP"

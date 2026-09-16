@@ -1,43 +1,43 @@
-# Mac Cleaner
+# Reclaim
 
-Mac Cleaner is a macOS cleanup tool built in Swift. The app is moving toward a general cleanup architecture where multiple scanners can contribute findings under the same permission model.
+<img src="Resources/AppIcon.png" width="96" align="right" alt="Reclaim icon">
 
-Current scanners:
-- Unity project scanner
-- Xcode `DerivedData` and `Archives` scanner
+A small, native macOS app that finds caches, logs and build leftovers you can safely remove.
 
-Available products:
-- `mac-cleaner`: general cleanup CLI that emits generic cleanup findings
-- `unity-detector`: specialized Unity scanner CLI
-- `MacCleanerGUI`: SwiftUI macOS app
-- `MacCleanerCore`: shared scanning and reporting core
+## What it cleans
 
-## Project direction
+Only fixed, well-known locations in your home folder. Nothing is matched by name across the disk.
 
-The long-term product is a general cleaner, not a Unity-only tool. Unity support remains useful, but it now sits behind a generic cleanup engine so future scanners can be added for areas like Xcode artifacts, caches, logs, and other developer-generated files.
+| Category | Locations | Selected by default |
+|---|---|---|
+| App Caches | `~/Library/Caches/*`, `~/Library/Containers/*/Data/Library/Caches/*` | Yes |
+| Logs | `~/Library/Logs/*` | Yes |
+| Developer Caches | Homebrew, CocoaPods, pip, Yarn, Go build, npm, Cargo | Yes (Gradle: no) |
+| Xcode | Simulator caches (yes); DerivedData, Device Support, Archives (no) | Mixed |
+| Project Dependencies | `node_modules`, `Pods`, Unity `Library/Temp/Obj/Logs` in your projects | No |
+| Trash, Mail Attachments | `~/.Trash`, Mail Downloads | No |
+
+Safety rules:
+- Removes what is *inside* a location, never the location itself.
+- Skips caches that hold state (CloudKit, Spotlight, FontRegistry, Finder, iCloud) or are costly to rebuild (JetBrains, Playwright).
+- Skips caches of apps that are running.
+- Xcode Archives and Mail attachments go to the Trash; everything else is deleted permanently, since the Trash frees no space.
+- Sizes are allocated bytes on disk with hard links counted once. APFS clones can make them an upper bound.
+
+Grant **Full Disk Access** (System Settings → Privacy & Security) to include Trash, Mail and sandboxed app caches. Reclaim works without it and tells you what it skipped.
 
 ## Development
 
-Build everything:
-
 ```bash
-swift build
+swift test                          # core tests
+Scripts/run-gui-app.sh              # build .build/Reclaim.app and open it
+Scripts/run-gui-app.sh release      # release build
+swift run reclaim-cli               # read-only list of what would be cleaned
+swift Scripts/make-icon.swift       # regenerate Resources/AppIcon.icns
 ```
 
-Run tests:
+Each app build records its git commit in `Info.plist` under `ReclaimGitCommit`.
 
-```bash
-swift test
-```
+## License
 
-Run the general CLI against the current directory:
-
-```bash
-swift run mac-cleaner --root=. --json
-```
-
-Run the specialized Unity scanner:
-
-```bash
-swift run unity-detector --root=. --json
-```
+MIT

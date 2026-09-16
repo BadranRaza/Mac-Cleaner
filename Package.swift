@@ -2,53 +2,16 @@
 import PackageDescription
 
 let package = Package(
-  name: "MacCleaner",
-  platforms: [
-    .macOS(.v13)
-  ],
+  name: "Reclaim",
+  platforms: [.macOS(.v14)],
   products: [
-    .library(
-      name: "MacCleanerCore",
-      targets: ["MacCleanerCore"]
-    ),
-    .executable(
-      name: "mac-cleaner",
-      targets: ["mac-cleaner"]
-    ),
-    .executable(
-      name: "unity-detector",
-      targets: ["unity-detector"]
-    ),
-    .executable(
-      name: "MacCleanerGUI",
-      targets: ["MacCleanerGUI"]
-    )
+    .executable(name: "Reclaim", targets: ["Reclaim"]),
+    .executable(name: "reclaim-cli", targets: ["reclaim-cli"]),
   ],
   targets: [
-    .target(
-      name: "MacCleanerCore",
-      path: "Sources/UnityProjectDetectorCore"
-    ),
-    .executableTarget(
-      name: "mac-cleaner",
-      dependencies: ["MacCleanerCore"],
-      path: "Sources/mac-cleaner"
-    ),
-    .executableTarget(
-      name: "unity-detector",
-      dependencies: ["MacCleanerCore"],
-      path: "Sources/unity-detector"
-    ),
-    .executableTarget(
-      name: "MacCleanerGUI",
-      dependencies: ["MacCleanerCore"],
-      path: "Sources/MacCleanerGUI",
-      exclude: ["MacCleanerGUI.entitlements"]
-    ),
-    .testTarget(
-      name: "MacCleanerCoreTests",
-      dependencies: ["MacCleanerCore"],
-      path: "Tests/MacCleanerCoreTests"
-    )
+    .target(name: "ReclaimCore"),
+    .executableTarget(name: "Reclaim", dependencies: ["ReclaimCore"]),
+    .executableTarget(name: "reclaim-cli", dependencies: ["ReclaimCore"]),
+    .testTarget(name: "ReclaimCoreTests", dependencies: ["ReclaimCore"]),
   ]
 )
