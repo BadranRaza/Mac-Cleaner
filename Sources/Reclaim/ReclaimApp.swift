@@ -31,6 +31,18 @@ final class Model {
   /// The group being reviewed, or nil for the overview.
   var openGroup: FileGroup?
   var result: CleanResult?
+  /// Space freed since the app opened, and moved to the Trash (freed once the Trash is emptied).
+  var sessionFreed: Int64 = 0
+  var sessionTrashed: Int64 = 0
+  /// Freed across all sessions.
+  var lifetimeFreed = Int64(UserDefaults.standard.integer(forKey: "lifetimeFreed"))
+
+  func record(_ result: CleanResult) {
+    sessionFreed += result.freedBytes
+    sessionTrashed += result.trashedBytes
+    lifetimeFreed += result.freedBytes
+    UserDefaults.standard.set(Int(lifetimeFreed), forKey: "lifetimeFreed")
+  }
   var hasFullDiskAccess = ReclaimCore.hasFullDiskAccess()
   /// Big things Reclaim leaves alone, explained.
   var insights: [Insight] = []
@@ -119,7 +131,9 @@ final class Model {
     let chosen = selected
     phase = .cleaning
     Task {
-      result = await Task.detached(priority: .userInitiated) { Cleaner.clean(chosen) }.value
+      let cleaned = await Task.detached(priority: .userInitiated) { Cleaner.clean(chosen) }.value
+      result = cleaned
+      record(cleaned)
       scannedAt = nil  // what's on disk changed
       phase = .done
     }
@@ -155,6 +169,8 @@ final class Model {
     let chosen = plan.map { $0.only(planSelection) }.filter { !$0.targets.isEmpty }
     Task {
       let result = await Cleaner.uninstall(app, plan: chosen)
+      record(result)
+      scannedAt = nil
       if result.failures.isEmpty {
         uninstallMessage = "\(app.name) and its files (\(format(result.trashedBytes))) are in the Trash. Empty the Trash to free the space."
         apps.removeAll { $0 == app }
@@ -365,17 +381,20 @@ struct HomeView: View {
             .fixedSize(horizontal: false, vertical: true)
           Text("Clean in one click, look through everything first,\nor remove apps you no longer use.")
             .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          if model.sessionFreed + model.sessionTrashed > 0 || model.lifetimeFreed > 0 {
+            SessionBadge(model: model).padding(.top, 4)
+          }
         }
       }
       let ready = model.scannedAt != nil
       HStack(spacing: 14) {
         ActionCard(symbol: "sparkles", title: "Quick Clean", detail: "Only safe files, in one step.",
                    colors: [Color(red: 0.20, green: 0.82, blue: 0.62), Color(red: 0.05, green: 0.52, blue: 0.62)],
-                   metric: ready ? "\(format(model.safeBytes)) ready" : nil, recommended: true, action: model.quickClean)
+                   metric: !ready ? nil : model.safeBytes > 0 ? "\(format(model.safeBytes)) ready" : "All clean", recommended: true, action: model.quickClean)
           .keyboardShortcut(.defaultAction)
         ActionCard(symbol: "magnifyingglass", title: "Scan & Review", detail: "See everything, pick what goes.",
                    colors: [Color(red: 0.35, green: 0.62, blue: 1.0), Color(red: 0.36, green: 0.36, blue: 0.92)],
-                   metric: ready ? "\(format(model.foundBytes)) found" : nil, action: { model.scan() })
+                   metric: !ready ? nil : model.foundBytes > 0 ? "\(format(model.foundBytes)) found" : "Nothing found", action: { model.scan() })
         ActionCard(symbol: "trash", title: "Uninstall Apps", detail: "Apps and everything they left.",
                    colors: [Color(red: 1.0, green: 0.45, blue: 0.55), Color(red: 0.93, green: 0.38, blue: 0.22)],
                    metric: model.apps.isEmpty ? nil : "\(model.apps.count) apps", action: model.openUninstall)
@@ -665,6 +684,10 @@ struct DoneView: View {
         .foregroundStyle(Brand.gradient)
         .symbolEffect(.bounce, value: model.phase)
       Text("\(format(result.freedBytes)) freed").font(.system(size: 40, weight: .bold, design: .rounded))
+        .contentTransition(.numericText())
+      if model.sessionFreed > result.freedBytes {
+        SessionBadge(model: model)
+      }
       if result.trashedBytes > 0 {
         Text("\(format(result.trashedBytes)) moved to the Trash, so you can still get it back.").foregroundStyle(.secondary)
       }
@@ -1044,5 +1067,25 @@ struct UninstallView: View {
     }
     .padding(.horizontal, 28).padding(.vertical, 14)
     .background(.bar)
+  }
+}
+
+/// "3.4 GB freed this session · 20 GB all time", shown on home and after cleaning.
+struct SessionBadge: View {
+  let model: Model
+
+  var body: some View {
+    let parts = [
+      model.sessionFreed > 0 ? "\(format(model.sessionFreed)) freed this session" : nil,
+      model.sessionTrashed > 0 ? "\(format(model.sessionTrashed)) in the Trash" : nil,
+      model.lifetimeFreed > model.sessionFreed ? "\(format(model.lifetimeFreed)) all time" : nil,
+    ].compactMap { $0 }
+    Label(parts.joined(separator: " · "), systemImage: "sparkles")
+      .font(.callout.weight(.medium))
+      .foregroundStyle(Brand.teal)
+      .padding(.horizontal, 12).padding(.vertical, 6)
+      .background(Brand.teal.opacity(0.12), in: Capsule())
+      .contentTransition(.numericText())
+      .help("Space in the Trash is freed when you empty the Trash.")
   }
 }

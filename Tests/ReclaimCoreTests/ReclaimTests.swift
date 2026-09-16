@@ -112,6 +112,24 @@ struct ReclaimTests {
   }
 
   @Test
+  func partlyFailedCleanCountsWhatWasRemoved() async throws {
+    let home = try FixtureHome()
+    defer { home.remove() }
+    let locked = home.url.appendingPathComponent("Library/Caches/com.example.app/locked")
+    try home.write(locked.appendingPathComponent("kept.bin"), bytes: 4096)
+    try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+
+    let findings = await Cleaner(home: home.url, runningApps: [], fullDiskAccess: true).scan().filter { $0.title == "Your apps" }
+    let before = findings.reduce(Int64(0)) { $0 + $1.bytes }
+    let result = Cleaner.clean(findings)
+
+    #expect(!result.failures.isEmpty)
+    #expect(result.freedBytes > 0)  // the removable files still count
+    #expect(result.freedBytes < before)  // the locked file doesn't
+  }
+
+  @Test
   func friendlyNames() {
     #expect(friendlyName("MyApp-bxkqzyrcgqlmnbfqnmgmyfxkdvkh", appID: nil) == "MyApp")
     #expect(friendlyName("org.swift.swiftpm", appID: nil) == "swiftpm")

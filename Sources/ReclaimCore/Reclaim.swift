@@ -345,7 +345,7 @@ public struct Cleaner: Sendable {
     var result = CleanResult()
     for finding in findings {
       for target in finding.targets {
-        var failed = false
+        var failedPaths: [URL] = []
         for path in target.paths {
           do {
             if path.deletingLastPathComponent().lastPathComponent == "LaunchAgents" { stopLoginItem(path) }
@@ -355,14 +355,14 @@ public struct Cleaner: Sendable {
               try FileManager.default.removeItem(at: path)
             }
           } catch {
-            failed = true
+            failedPaths.append(path)
             result.failures.append("\(path.path): \(error.localizedDescription)")
           }
         }
-        // ponytail: a partly failed item counts as not freed; per-path sizes if totals need to be exact.
-        if !failed {
-          if finding.movesToTrash { result.trashedBytes += target.bytes } else { result.freedBytes += target.bytes }
-        }
+        // A folder can be partly removed (a file in use); count only what is really gone.
+        let left = failedPaths.reduce(Int64(0)) { $0 + allocatedSize(of: $1) }
+        let gone = max(0, target.bytes - left)
+        if finding.movesToTrash { result.trashedBytes += gone } else { result.freedBytes += gone }
       }
     }
     return result
