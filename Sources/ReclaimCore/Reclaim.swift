@@ -18,6 +18,21 @@ public enum Category: String, CaseIterable, Sendable {
     }
   }
 
+  /// One friendly sentence on what this is and whether it is safe to remove.
+  public var summary: String {
+    switch self {
+    case .xcode: "Build caches, simulator data and archives. Xcode recreates caches; archives are your past releases."
+    case .unity: "Unity rebuilds Library, Temp and Obj when you reopen a project. Builds are moved to the Trash."
+    case .nodeModules: "Installed JavaScript packages. Run npm install again when you work on the project."
+    case .pods: "Installed CocoaPods. Run pod install again when you work on the project."
+    case .developer: "Download caches of package managers. They re-download what they need."
+    case .caches: "Temporary files apps keep to load faster. Apps rebuild them automatically."
+    case .logs: "Diagnostic logs apps write over time. Safe to remove."
+    case .trash: "Files already in your Trash. Removing them is permanent."
+    case .mail: "Attachments Mail downloaded. They download again when you open the email."
+    }
+  }
+
   public var symbol: String {
     switch self {
     case .caches: "internaldrive"
@@ -63,6 +78,8 @@ public struct CleanResult: Sendable {
   public var freedBytes: Int64 = 0
   public var trashedBytes: Int64 = 0
   public var failures: [String] = []
+
+  public init() {}
 }
 
 private struct Rule {
