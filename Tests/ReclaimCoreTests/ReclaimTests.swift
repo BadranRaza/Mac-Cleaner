@@ -16,8 +16,10 @@ struct ReclaimTests {
     let userCaches = Set(byTitle["User caches"]?.targets.map(\.url.lastPathComponent) ?? [])
     #expect(userCaches == ["com.example.app"])  // no Homebrew, protected CloudKit, or running apps
 
-    #expect(byTitle["web · node_modules"] != nil)
-    #expect(byTitle["Game · Unity cache"]?.targets.map(\.url.lastPathComponent) == ["Library"])
+    #expect(byTitle["web"]?.category == .nodeModules)
+    #expect(byTitle["Game · caches"]?.targets.map(\.url.lastPathComponent) == ["Library"])
+    #expect(byTitle["Game · builds"]?.movesToTrash == true)
+    #expect(Set(findings.map(\.id)).count == findings.count)
     #expect(!findings.contains { $0.location.path.contains("Application Support") })
     #expect(byTitle["Homebrew"]?.bytes ?? 0 >= 4096)
   }
@@ -37,13 +39,17 @@ struct ReclaimTests {
     let home = try FixtureHome()
     defer { home.remove() }
 
-    let findings = await Cleaner(home: home.url, runningApps: [], fullDiskAccess: true).scan().filter { $0.title == "User caches" }
+    let caches = home.url.appendingPathComponent("Library/Caches")
+    let kept = caches.appendingPathComponent("com.running.app")
+    let findings = await Cleaner(home: home.url, runningApps: [], fullDiskAccess: true).scan()
+      .filter { $0.title == "User caches" }
+      .map { finding in finding.only(Set(finding.targets.map(\.url)).subtracting([kept])) }
     let result = Cleaner.clean(findings)
 
     #expect(result.failures.isEmpty)
     #expect(result.freedBytes > 0)
-    let caches = home.url.appendingPathComponent("Library/Caches")
     #expect(FileManager.default.fileExists(atPath: caches.path))
+    #expect(FileManager.default.fileExists(atPath: kept.path))  // unselected item survives
     #expect(!FileManager.default.fileExists(atPath: caches.appendingPathComponent("com.example.app").path))
     #expect(FileManager.default.fileExists(atPath: caches.appendingPathComponent("CloudKit").path))
   }
@@ -69,6 +75,7 @@ private struct FixtureHome {
       "Projects/Game/ProjectSettings/ProjectVersion.txt",
       "Projects/Game/Assets/a.png",
       "Projects/Game/Library/ArtifactDB",
+      "Projects/Game/Builds/Game.app.zip",
     ] {
       let file = url.appendingPathComponent(path)
       try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)

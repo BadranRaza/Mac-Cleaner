@@ -1,7 +1,8 @@
 import AppKit
 
 public enum Category: String, CaseIterable, Sendable {
-  case caches, logs, trash, xcode, developer, projects, mail
+  // Declaration order is the section order in the app.
+  case xcode, unity, nodeModules, pods, developer, caches, logs, trash, mail
 
   public var title: String {
     switch self {
@@ -10,7 +11,9 @@ public enum Category: String, CaseIterable, Sendable {
     case .trash: "Trash"
     case .xcode: "Xcode"
     case .developer: "Developer Caches"
-    case .projects: "Project Dependencies"
+    case .unity: "Unity"
+    case .nodeModules: "node_modules"
+    case .pods: "CocoaPods Pods"
     case .mail: "Mail Attachments"
     }
   }
@@ -22,7 +25,9 @@ public enum Category: String, CaseIterable, Sendable {
     case .trash: "trash"
     case .xcode: "hammer"
     case .developer: "shippingbox"
-    case .projects: "folder"
+    case .unity: "cube"
+    case .nodeModules: "shippingbox.circle"
+    case .pods: "square.stack.3d.up"
     case .mail: "envelope"
     }
   }
@@ -44,8 +49,14 @@ public struct Finding: Identifiable, Hashable, Sendable {
   /// Moved to the Trash instead of deleted, for things that are hard to get back.
   public let movesToTrash: Bool
 
-  public var id: String { location.path }
+  public var id: String { "\(title)|\(location.path)" }
   public var bytes: Int64 { targets.reduce(0) { $0 + $1.bytes } }
+
+  /// The same finding limited to the chosen targets.
+  public func only(_ urls: Set<URL>) -> Finding {
+    Finding(title: title, category: category, location: location, targets: targets.filter { urls.contains($0.url) },
+            preselected: preselected, movesToTrash: movesToTrash)
+  }
 }
 
 public struct CleanResult: Sendable {
@@ -193,10 +204,10 @@ public struct Cleaner: Sendable {
     ) else { return [] }
 
     var found: [Pending] = []
-    func add(_ title: String, _ location: URL, _ targets: [URL]) {
-      found.append(Pending(title: title, category: .projects, location: location, targets: targets,
-                           preselected: false, movesToTrash: false))
-      walker.skipDescendants()
+    func add(_ title: String, _ category: Category, _ location: URL, _ targets: [URL], trash: Bool = false) {
+      guard !targets.isEmpty else { return }
+      found.append(Pending(title: title, category: category, location: location, targets: targets,
+                           preselected: false, movesToTrash: trash))
     }
 
     for case let url as URL in walker {
@@ -213,13 +224,18 @@ public struct Cleaner: Sendable {
 
       let parent = url.deletingLastPathComponent()
       if name == "node_modules", exists(parent.appendingPathComponent("package.json")) {
-        add("\(parent.lastPathComponent) · node_modules", url, [url])
+        add(parent.lastPathComponent, .nodeModules, url, [url])
+        walker.skipDescendants()
       } else if name == "Pods", exists(parent.appendingPathComponent("Podfile")) {
-        add("\(parent.lastPathComponent) · Pods", url, [url])
+        add(parent.lastPathComponent, .pods, url, [url])
+        walker.skipDescendants()
       } else if exists(url.appendingPathComponent("ProjectSettings/ProjectVersion.txt")),
                 exists(url.appendingPathComponent("Assets")) {
-        let targets = ["Library", "Temp", "Obj", "Logs"].map { url.appendingPathComponent($0) }.filter(exists)
-        if targets.isEmpty { walker.skipDescendants() } else { add("\(name) · Unity cache", url, targets) }
+        let inProject = { (names: [String]) in names.map { url.appendingPathComponent($0) }.filter(self.exists) }
+        add("\(name) · caches", .unity, url, inProject(["Library", "Temp", "Obj", "Logs"]))
+        // Builds may be the only copy of a release, so they go to the Trash.
+        add("\(name) · builds", .unity, url, inProject(["Build", "Builds"]), trash: true)
+        walker.skipDescendants()
       }
     }
     return found

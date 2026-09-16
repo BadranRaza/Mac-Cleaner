@@ -20,13 +20,15 @@ final class Model {
 
   var phase = Phase.idle
   var findings: [Finding] = []
-  var selection: Set<String> = []
+  /// Selected target URLs; each item inside a finding can be kept or removed on its own.
+  var selection: Set<URL> = []
   var hasFullDiskAccess = ReclaimCore.hasFullDiskAccess()
   var message: String?
   private var scanTask: Task<Void, Never>?
 
-  var selected: [Finding] { findings.filter { selection.contains($0.id) } }
+  var selected: [Finding] { findings.map { $0.only(selection) }.filter { !$0.targets.isEmpty } }
   var selectedBytes: Int64 { selected.reduce(0) { $0 + $1.bytes } }
+  var itemCount: Int { findings.reduce(0) { $0 + $1.targets.count } }
 
   func scan() {
     phase = .scanning
@@ -34,7 +36,7 @@ final class Model {
       let results = await Task.detached(priority: .userInitiated) { await Cleaner().scan() }.value
       guard !Task.isCancelled else { return }
       findings = results
-      selection = Set(results.filter(\.preselected).map(\.id))
+      selection = Set(results.filter(\.preselected).flatMap { $0.targets.map(\.url) })
       phase = .results
     }
   }
@@ -89,7 +91,7 @@ struct ContentView: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(format(model.selectedBytes)).font(.title2.bold()).monospacedDigit()
           .contentTransition(.numericText())
-        Text("\(model.selection.count) of \(model.findings.count) selected").font(.caption).foregroundStyle(.secondary)
+        Text("\(model.selection.count) of \(model.itemCount) items selected").font(.caption).foregroundStyle(.secondary)
       }
       Spacer()
       Button("Scan Again", action: model.scan)
@@ -100,7 +102,7 @@ struct ContentView: View {
         .confirmationDialog("Clean \(format(model.selectedBytes))?", isPresented: $confirming) {
           Button("Clean", role: .destructive, action: model.clean)
         } message: {
-          Text("Caches and logs are deleted permanently. Archives and Mail attachments go to the Trash.")
+          Text("Items are deleted permanently, except Xcode Archives, Unity builds and Mail attachments, which go to the Trash.")
         }
     }
     .controlSize(.large)
@@ -186,67 +188,74 @@ struct ResultsList: View {
 
 struct FindingRow: View {
   let finding: Finding
-  @Binding var selection: Set<String>
+  @Binding var selection: Set<URL>
   @State private var expanded = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
-      toggle
+      // Native checkbox that shows a mixed state when only some items are selected.
+      Toggle(sources: finding.targets.map(binding), isOn: \.self) {
+        row(title: finding.title, path: finding.targets.count == 1 ? finding.targets[0].url : finding.location,
+            bytes: finding.bytes, trash: finding.movesToTrash)
+      }
       if finding.targets.count > 1 { breakdown }
     }
-    .padding(.vertical, 3)
-    .contextMenu {
-      Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([finding.location]) }
-    }
-  }
-
-  private var toggle: some View {
-    Toggle(isOn: Binding(
-      get: { selection.contains(finding.id) },
-      set: { if $0 { selection.insert(finding.id) } else { selection.remove(finding.id) } }
-    )) {
-      HStack {
-        VStack(alignment: .leading, spacing: 2) {
-          HStack(spacing: 6) {
-            Text(finding.title)
-            if finding.movesToTrash {
-              Text("Moves to Trash").font(.caption2).foregroundStyle(.secondary)
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(.quaternary, in: Capsule())
-            }
-          }
-          Text((finding.location.path as NSString).abbreviatingWithTildeInPath)
-            .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-        }
-        Spacer()
-        Text(format(finding.bytes)).monospacedDigit().foregroundStyle(.secondary)
-      }
-    }
     .toggleStyle(.checkbox)
+    .padding(.vertical, 3)
   }
 
   private var breakdown: some View {
-    VStack(alignment: .leading, spacing: 3) {
+    VStack(alignment: .leading, spacing: 6) {
       Button {
         withAnimation(.snappy) { expanded.toggle() }
       } label: {
-        Label("\(finding.targets.count) items", systemImage: "chevron.right")
+        Label("\(finding.targets.filter { selection.contains($0.url) }.count) of \(finding.targets.count) items selected",
+              systemImage: "chevron.right")
           .labelStyle(TrailingIcon(rotated: expanded))
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
       .buttonStyle(.plain)
       if expanded {
-        ForEach(finding.targets.sorted { $0.bytes > $1.bytes }.prefix(25), id: \.url) { target in
-          HStack {
-            Text(target.url.lastPathComponent).lineLimit(1)
-            Spacer()
-            Text(format(target.bytes)).monospacedDigit()
+        ForEach(finding.targets.sorted { $0.bytes > $1.bytes }, id: \.url) { target in
+          Toggle(isOn: binding(target)) {
+            row(title: target.url.lastPathComponent, path: target.url, bytes: target.bytes, trash: false)
           }
         }
       }
     }
-    .font(.caption)
-    .foregroundStyle(.secondary)
     .padding(.leading, 20)
+  }
+
+  private func binding(_ target: Target) -> Binding<Bool> {
+    Binding(
+      get: { selection.contains(target.url) },
+      set: { if $0 { selection.insert(target.url) } else { selection.remove(target.url) } }
+    )
+  }
+
+  private func row(title: String, path: URL, bytes: Int64, trash: Bool) -> some View {
+    HStack {
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 6) {
+          Text(title)
+          if trash {
+            Text("Moves to Trash").font(.caption2).foregroundStyle(.secondary)
+              .padding(.horizontal, 5).padding(.vertical, 1)
+              .background(.quaternary, in: Capsule())
+          }
+        }
+        Text((path.path as NSString).abbreviatingWithTildeInPath)
+          .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+          .textSelection(.enabled)
+      }
+      Spacer()
+      Text(format(bytes)).monospacedDigit().foregroundStyle(.secondary)
+    }
+    .contentShape(Rectangle())
+    .contextMenu {
+      Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([path]) }
+    }
   }
 }
 
