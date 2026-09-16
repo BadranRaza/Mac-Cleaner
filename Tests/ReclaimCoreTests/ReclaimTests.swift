@@ -58,6 +58,34 @@ struct ReclaimTests {
   }
 
   @Test
+  func leftoversGroupAnAppsFilesAndFindKnownToolFolders() throws {
+    let home = try FixtureHome()
+    defer { home.remove() }
+    let lib = home.url.appendingPathComponent("Library")
+    try home.write(lib.appendingPathComponent("Preferences/com.gone.editor.plist"), bytes: 1024)
+    try home.write(lib.appendingPathComponent("HTTPStorages/com.gone.editor/cache"), bytes: 1_200_000)
+    try home.write(lib.appendingPathComponent("Preferences/com.gone.tiny.plist"), bytes: 1024)  // lone small plist: hidden
+    try home.write(home.url.appendingPathComponent(".trae/state"), bytes: 2048)
+
+    let targets = Cleaner(home: home.url, runningApps: [], fullDiskAccess: true)
+      .findLeftovers(apps: InstalledApps(ids: [])).flatMap(\.targets)
+    let editor = targets.first { $0.name == "Editor" }
+    #expect(Set(editor?.paths.map(\.lastPathComponent) ?? []) == ["com.gone.editor.plist", "com.gone.editor"])
+    #expect(!targets.contains { $0.name == "Tiny" })
+    #expect(targets.first { $0.name == "Trae" }?.paths.map(\.lastPathComponent) == [".trae"])
+  }
+
+  @Test
+  func deletedAccountFoldersSkipLiveAccounts() throws {
+    let home = try FixtureHome()
+    defer { home.remove() }
+    let users = home.url.appendingPathComponent("Users")
+    for name in ["me", "second", "gone", "Shared"] { try home.write(users.appendingPathComponent("\(name)/file")) }
+    let live: Set<String> = ["me", "second"].map { users.appendingPathComponent($0).standardizedFileURL.path }.reduce(into: []) { $0.insert($1) }
+    #expect(deletedAccountFolders(in: users, accountHomes: live).map(\.lastPathComponent) == ["gone"])
+  }
+
+  @Test
   func oldPluginVersionsKeepTheOneInUse() throws {
     let home = try FixtureHome()
     defer { home.remove() }

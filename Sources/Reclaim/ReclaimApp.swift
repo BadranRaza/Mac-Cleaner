@@ -133,7 +133,8 @@ final class Model {
     let chosen = selected
     phase = .cleaning
     Task {
-      let cleaned = await Task.detached(priority: .userInitiated) { Cleaner.clean(chosen) }.value
+      let firstPass = await Task.detached(priority: .userInitiated) { Cleaner.clean(chosen) }.value
+      let cleaned = Cleaner.withPassword(firstPass, plan: chosen)
       result = cleaned
       record(cleaned)
       scannedAt = nil  // what's on disk changed

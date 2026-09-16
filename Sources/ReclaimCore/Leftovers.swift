@@ -27,51 +27,142 @@ struct InstalledApps: Sendable {
     self.ids = ids
   }
 
-  /// True when an app from the same vendor is installed (or LaunchServices knows the ID).
-  /// Extensions and helpers often use IDs that differ from their app's, so the vendor is the safe unit.
-  // ponytail: vendor = first two ID parts; an unrelated app from the same vendor keeps leftovers hidden.
-  func hasApp(forID id: String) -> Bool {
-    if ids.contains(id) || NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) != nil { return true }
-    let vendor = Self.vendor(id)
-    return ids.contains { Self.vendor($0) == vendor }
-  }
-
-  static func vendor(_ id: String) -> String {
-    id.split(separator: ".").prefix(2).joined(separator: ".").lowercased()
+  /// True when an installed app has this ID or a related one (its extension or helper, e.g.
+  /// "com.maker.app.widget" for "com.maker.app"), or LaunchServices knows the ID.
+  /// `sameVendor` also counts any app from the same maker: helpers and shared folders often use IDs
+  /// unrelated to their app's (e.g. "com.openai.sky.CUAService" for ChatGPT).
+  func hasApp(forID id: String, sameVendor: Bool = true) -> Bool {
+    let id = id.lowercased()
+    if NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) != nil { return true }
+    let vendor = id.split(separator: ".").prefix(2).joined(separator: ".")
+    return ids.contains { installed in
+      let installed = installed.lowercased()
+      return installed == id || id.hasPrefix(installed + ".") || installed.hasPrefix(id + ".")
+        || (sameVendor && installed.split(separator: ".").prefix(2).joined(separator: ".") == vendor)
+    }
   }
 }
 
+/// Tools that keep data outside ~/Library (hidden folders) or under a plain name in Application Support.
+/// Removed apps from big makers (Google, Microsoft) would hide behind the maker's other apps,
+/// so these are recognized explicitly.
+struct KnownTool {
+  let name: String
+  let appIDs: [String]
+  let commands: [String]
+  let paths: [String]
+  /// App names that also count as installed, e.g. "Gemini" for a Gemini app from anywhere.
+  var appNames: [String] = []
+
+  static let all: [KnownTool] = [
+    // ~/.gemini belongs to Gemini CLI and Antigravity; Gemini in Chrome keeps its data inside Chrome's profile.
+    KnownTool(name: "Antigravity and Gemini CLI", appIDs: ["com.google.antigravity", "com.google.antigravity-ide"], commands: ["gemini"],
+              paths: [".antigravity", ".antigravity-ide", ".gemini", "Library/Application Support/Antigravity",
+                      "Library/Application Support/Antigravity IDE"],
+              appNames: ["Antigravity", "Antigravity IDE", "Gemini"]),
+    KnownTool(name: "Cursor", appIDs: ["com.todesktop.230313mzl4w4u92"], commands: ["cursor"],
+              paths: [".cursor", "Library/Application Support/Cursor"]),
+    KnownTool(name: "Windsurf", appIDs: ["com.exafunction.windsurf"], commands: ["windsurf"],
+              paths: [".windsurf", ".codeium", "Library/Application Support/Windsurf"]),
+    KnownTool(name: "Trae", appIDs: ["com.trae.app"], commands: ["trae"],
+              paths: [".trae", ".trae-cn", "Library/Application Support/Trae", "Library/Application Support/Trae CN"]),
+    KnownTool(name: "Kiro", appIDs: ["dev.kiro.desktop"], commands: ["kiro"], paths: [".kiro", "Library/Application Support/Kiro"]),
+    KnownTool(name: "Visual Studio Code", appIDs: ["com.microsoft.VSCode"], commands: ["code"],
+              paths: [".vscode", "Library/Application Support/Code"]),
+    KnownTool(name: "Zed", appIDs: ["dev.zed.Zed"], commands: ["zed"], paths: ["Library/Application Support/Zed"]),
+    KnownTool(name: "GitKraken", appIDs: ["com.axosoft.gitkraken"], commands: ["gitkraken"],
+              paths: [".gitkraken", "Library/Application Support/GitKraken"]),
+    KnownTool(name: "BrowserStack Local", appIDs: [], commands: ["BrowserStackLocal", "browserstack-local"], paths: [".browserstack"]),
+    KnownTool(name: "Visual Studio for Mac", appIDs: ["com.microsoft.visual-studio"], commands: [],
+              paths: [".ServiceHub", "Library/Application Support/VisualStudio"]),
+    KnownTool(name: "Plastic SCM", appIDs: ["com.codicesoftware.plasticscm"], commands: ["cm", "plastic"],
+              paths: [".plastic4", "Library/Application Support/PlasticSCM"]),
+    KnownTool(name: "Ollama", appIDs: ["com.electron.ollama"], commands: ["ollama"], paths: [".ollama", "Library/Application Support/Ollama"]),
+  ]
+}
+
+/// Whether a command-line tool is installed. Apps started from Finder get a short PATH, so common tool folders are added.
+func commandExists(_ name: String, home: URL) -> Bool {
+  let path = ProcessInfo.processInfo.environment["PATH"]?.split(separator: ":").map(String.init) ?? []
+  let common = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] + [".local/bin", ".cargo/bin", ".npm-global/bin", ".bun/bin"].map { home.appendingPathComponent($0).path }
+  return (path + common).contains { FileManager.default.isExecutableFile(atPath: "\($0)/\(name)") }
+}
+
+/// Home folders that no account uses any more, e.g. kept when an account was deleted.
+func deletedAccountFolders(in users: URL = URL(fileURLWithPath: "/Users"), accountHomes: Set<String> = accountHomes()) -> [URL] {
+  ((try? FileManager.default.contentsOfDirectory(atPath: users.path)) ?? [])
+    .filter { !$0.hasPrefix(".") && !["Shared", "Deleted Users", "Guest"].contains($0) }
+    .map { users.appendingPathComponent($0) }
+    .filter { url in
+      var isDirectory: ObjCBool = false
+      return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+        && !accountHomes.contains(url.standardizedFileURL.path)
+    }
+}
+
+func accountHomes() -> Set<String> {
+  var homes = Set<String>()
+  setpwent()
+  while let entry = getpwent() { homes.insert(URL(fileURLWithPath: String(cString: entry.pointee.pw_dir)).standardizedFileURL.path) }
+  endpwent()
+  return homes
+}
+
 extension Cleaner {
-  /// Data from removed apps (exact bundle-ID folders only) and login items whose program is gone.
+  /// Data from removed apps, found by exact bundle ID, known tool folders, login items whose program is gone,
+  /// and home folders of deleted accounts.
   func findLeftovers(apps: InstalledApps) -> [Pending] {
-    var targets: [PendingTarget] = []
     let library = home.appendingPathComponent("Library")
+    var byID: [String: [URL]] = [:]
 
     func isAppID(_ id: String) -> Bool {
-      let lower = id.lowercased()
-      return id.split(separator: ".").count >= 3 && !lower.contains("com.apple.") && !lower.hasPrefix("is.workflow")
+      let parts = id.lowercased().split(separator: ".")
+      return parts.count >= 3 && !parts.contains("apple") && !id.lowercased().hasPrefix("is.workflow")
     }
-    func add(_ url: URL, id: String) {
-      targets.append(PendingTarget(url: url, name: leftoverName(id), appID: nil, paths: [url]))
+    func collect(_ folder: String, id: (URL) -> String?) {
+      for url in children(of: library.appendingPathComponent(folder)) {
+        if let id = id(url), isAppID(id), !apps.hasApp(forID: id) { byID[id, default: []].append(url) }
+      }
     }
 
     // Other apps' containers are privacy-protected; reading them without Full Disk Access shows a warning.
     if fullDiskAccess {
-      for url in children(of: library.appendingPathComponent("Containers")) {
-        let id = url.lastPathComponent
-        if isAppID(id), !apps.hasApp(forID: id) { add(url, id: id) }
-      }
-      for url in children(of: library.appendingPathComponent("Group Containers")) {
+      collect("Containers") { $0.lastPathComponent }
+      collect("Group Containers") { url in
         // "TEAMID1234.group.com.vendor.app", "group.com.vendor.app", "TEAMID1234.com.vendor.app"
         var parts = url.lastPathComponent.split(separator: ".").map(String.init)
         if let first = parts.first, first.count == 10, first == first.uppercased() { parts.removeFirst() }
         if let first = parts.first, first == "group" || first == "groups" { parts.removeFirst() }
-        let id = parts.joined(separator: ".")
-        if isAppID(id), !apps.hasApp(forID: id) { add(url, id: id) }
+        return parts.joined(separator: ".")
       }
     }
-    // Application Support is skipped on purpose: command-line tools use app-like folder names there,
-    // and it holds data (like app runtimes) that is painful to rebuild.
+    collect("Preferences") { $0.pathExtension == "plist" ? $0.deletingPathExtension().lastPathComponent : nil }
+    collect("HTTPStorages") { $0.lastPathComponent.replacingOccurrences(of: ".binarycookies", with: "") }
+    collect("WebKit") { $0.lastPathComponent }
+    collect("Saved Application State") { $0.pathExtension == "savedState" ? $0.deletingPathExtension().lastPathComponent : nil }
+
+    var targets: [PendingTarget] = byID.compactMap { id, urls in
+      // Lone settings files are tiny and many belong to command-line tools; list apps that left real data.
+      let hasData = urls.contains { $0.path.contains("/Containers/") || $0.path.contains("/Group Containers/") }
+        || urls.reduce(Int64(0)) { $0 + allocatedSize(of: $1) } >= 1_000_000
+      return hasData ? PendingTarget(url: urls[0], name: leftoverName(id), appID: nil, paths: urls) : nil
+    }
+
+    let claimed = Set(targets.flatMap(\.paths).map(\.path))
+    for tool in KnownTool.all {
+      let installed = tool.appIDs.contains { apps.hasApp(forID: $0, sameVendor: false) }
+        || tool.commands.contains { commandExists($0, home: home) }
+        || tool.appNames.contains { name in ["/Applications", home.appendingPathComponent("Applications").path].contains {
+          exists(URL(fileURLWithPath: "\($0)/\(name).app")) } }
+      guard !installed else { continue }
+      // The tool's own folders plus the settings and web data it left under its app IDs.
+      let byAppID = tool.appIDs.flatMap { id in
+        ["Preferences/\(id).plist", "HTTPStorages/\(id)", "HTTPStorages/\(id).binarycookies", "WebKit/\(id)",
+         "Saved Application State/\(id).savedState", "Caches/\(id)", "Logs/\(id)", "Containers/\(id)"].map { "Library/\($0)" }
+      }
+      let urls = (tool.paths + byAppID).map { home.appendingPathComponent($0) }.filter { exists($0) && !claimed.contains($0.path) }
+      if !urls.isEmpty { targets.append(PendingTarget(url: urls[0], name: tool.name, appID: nil, paths: urls)) }
+    }
 
     for plist in children(of: library.appendingPathComponent("LaunchAgents")) where plist.pathExtension == "plist" {
       guard let program = loginItemProgram(plist), !FileManager.default.fileExists(atPath: program) else { continue }
@@ -80,9 +171,22 @@ extension Cleaner {
                                    appID: nil, paths: [plist]))
     }
 
-    guard !targets.isEmpty else { return [] }
-    return [Pending(title: "Removed apps", category: .leftovers, location: library, targets: targets,
-                    safety: .checkFirst, movesToTrash: true)]
+    var found: [Pending] = []
+    if !targets.isEmpty {
+      found.append(Pending(title: "Removed apps", category: .leftovers, location: library, targets: targets,
+                           safety: .checkFirst, movesToTrash: true))
+    }
+    // Only for the real home folder; another account's data is shown, never guessed at in tests or other roots.
+    if home.deletingLastPathComponent().path == "/Users" {
+      let accounts = deletedAccountFolders().map {
+        PendingTarget(url: $0, name: "\($0.lastPathComponent) · account that was deleted", appID: nil, paths: [$0])
+      }
+      if !accounts.isEmpty {
+        found.append(Pending(title: "Folders of deleted accounts", category: .leftovers, location: home.deletingLastPathComponent(),
+                             targets: accounts, safety: .checkFirst, movesToTrash: true))
+      }
+    }
+    return found
   }
 
   /// The program a login item starts, when we can tell for sure that it's missing.

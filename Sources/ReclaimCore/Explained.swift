@@ -18,7 +18,6 @@ extension Cleaner {
       (".docker", "Docker settings and build cache", "Clean up inside Docker with “docker builder prune”.", true),
       (".codex/sessions", "Codex conversation history", "Your past Codex chats. Only delete them if you won't need them again.", true),
       (".claude/projects", "Claude Code conversation history", "Your past Claude Code sessions. Only delete them if you won't need them again.", true),
-      (".gemini/antigravity-browser-profile", "Antigravity browser profile", "Holds sign-ins for Antigravity's browser. Sign out there instead of deleting it.", true),
       (".ollama/models", "Ollama AI models", "Remove models you don't use with “ollama rm”.", true),
       (".cocoapods/repos", "CocoaPods library list", "Frees space with “pod repo remove trunk”; CocoaPods downloads what it needs later.", false),
       ("Library/Developer/CoreSimulator/Devices", "iPhone simulators", "Remove simulators you don't use in Xcode › Settings › Components.", true),
@@ -39,8 +38,11 @@ extension Cleaner {
       return result
     }
 
+    // Live accounts only; folders of deleted accounts are listed under Leftovers.
+    let homes = accountHomes()
     let others = children(of: home.deletingLastPathComponent())
-      .filter { !["Shared", home.lastPathComponent].contains($0.lastPathComponent) && !$0.lastPathComponent.hasPrefix(".") }
+      .filter { !["Shared", home.lastPathComponent].contains($0.lastPathComponent) && !$0.lastPathComponent.hasPrefix(".")
+        && homes.contains($0.standardizedFileURL.path) }
     if !others.isEmpty {
       insights.append(Insight(title: "Other accounts on this Mac (\(others.count))",
                               advice: "Their files are private to them. Each person can run Reclaim in their own account.",

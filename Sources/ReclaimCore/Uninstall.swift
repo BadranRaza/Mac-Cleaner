@@ -122,10 +122,16 @@ extension Cleaner {
         return result
       }
     }
-    var result = await Task.detached { clean(plan) }.value
-    guard !result.needsPassword.isEmpty else { return result }
+    let result = await Task.detached { clean(plan) }.value
+    return withPassword(result, plan: plan)
+  }
 
-    // Apps installed for all users are owned by the system; like Finder, ask for the password once.
+  /// Items owned by the system (apps installed for everyone, deleted accounts' folders) need the admin
+  /// password to move. Like Finder, ask once and move them to the Trash.
+  @MainActor
+  public static func withPassword(_ result: CleanResult, plan: [Finding]) -> CleanResult {
+    var result = result
+    guard !result.needsPassword.isEmpty else { return result }
     let locked = result.needsPassword
     let trash = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash")
     var error: NSDictionary?
@@ -134,8 +140,9 @@ extension Cleaner {
       result.passwordDeclined = (error[NSAppleScript.errorNumber] as? Int) == -128
       return result
     }
-    let sizes = Dictionary(plan.flatMap(\.targets).map { ($0.url, $0.bytes) }, uniquingKeysWith: { a, _ in a })
-    result.trashedBytes += locked.reduce(0) { $0 + (sizes[$1] ?? 0) }
+    // Sizes of the items that were moved; a locked path is a whole target or one of its paths.
+    let bytes = plan.flatMap(\.targets).filter { !Set($0.paths).isDisjoint(with: locked) }.reduce(Int64(0)) { $0 + $1.bytes }
+    result.trashedBytes += bytes
     result.failures.removeAll { failure in locked.contains { failure.hasPrefix($0.path + ":") } }
     result.needsPassword = []
     return result

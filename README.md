@@ -19,7 +19,7 @@ Every item is tagged, and only **Safe** items are selected by default:
 | Activity Logs | `~/Library/Logs` | Safe |
 | Trash | `~/.Trash` | Check first |
 | Email Attachments | Mail Downloads (moved to the Trash) | Check first |
-| Leftovers from Deleted Apps | Containers of apps that are no longer installed; login items whose program is gone (turned off, moved to the Trash) | Check first |
+| Leftovers from Deleted Apps | Data of apps that are no longer installed (containers, settings, web data, grouped per app); hidden folders of known tools like Antigravity, Cursor, Windsurf, GitKraken; login items whose program is gone; home folders of deleted accounts (moved to the Trash with your password) | Check first |
 | Duplicate Files | Real extra copies (not APFS clones) of files over 50 MB in Desktop, Documents, Downloads; the oldest copy is kept | Check first |
 | Developer Downloads | Homebrew, CocoaPods, pip, Yarn, Go, npm, Cargo, unused Codex installs, old Claude Code plugin versions; `~/.cache` and Gradle | Safe; `~/.cache` and Gradle take time |
 | Xcode | Simulator files (safe); build files, iPhone debugging files (take time); archived builds (check first, moved to the Trash) | Mixed |

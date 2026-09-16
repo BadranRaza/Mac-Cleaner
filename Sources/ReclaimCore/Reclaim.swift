@@ -361,7 +361,8 @@ public struct Cleaner: Sendable {
           } catch {
             failedPaths.append(path)
             result.failures.append("\(path.path): \(error.localizedDescription)")
-            if isPermissionError(error) { result.needsPassword.append(path) }
+            // Only items headed for the Trash are retried with the password; permanent deletes never escalate.
+            if finding.movesToTrash, isPermissionError(error) { result.needsPassword.append(path) }
           }
         }
         // A folder can be partly removed (a file in use); count only what is really gone.
