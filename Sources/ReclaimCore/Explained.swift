@@ -7,6 +7,8 @@ public struct Insight: Identifiable, Hashable, Sendable {
   public let url: URL
   /// Nil when measuring would take too long (millions of tiny files).
   public let bytes: Int64?
+  /// A Terminal command the user can copy and run themselves, when that's the only way.
+  public var command: String? = nil
   public var id: URL { url }
 }
 
@@ -40,6 +42,20 @@ extension Cleaner {
 
     // Live accounts only; folders of deleted accounts are listed under Leftovers.
     let homes = accountHomes()
+    // Folders left by deleted accounts. macOS doesn't let an app remove them, even with the admin password:
+    // the password prompt runs without the app's Full Disk Access, and the folder holds protected data.
+    // Terminal with Full Disk Access can, so we explain and offer the command.
+    if home.deletingLastPathComponent().path == "/Users" {
+      for folder in deletedAccountFolders() {
+        let quoted = "'" + folder.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        insights.append(Insight(
+          title: "Files of deleted account “\(folder.lastPathComponent)”", 
+          advice: "The account is gone but its files stayed. Look through them from another account first, then remove them in Terminal (it deletes for good).",
+          url: folder, bytes: allocatedSize(of: folder),
+          command: "sudo chmod -RN \(quoted) && sudo rm -rf \(quoted)"))
+      }
+    }
+
     let others = children(of: home.deletingLastPathComponent())
       .filter { !["Shared", home.lastPathComponent].contains($0.lastPathComponent) && !$0.lastPathComponent.hasPrefix(".")
         && homes.contains($0.standardizedFileURL.path) }

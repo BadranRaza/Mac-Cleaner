@@ -176,16 +176,6 @@ extension Cleaner {
       found.append(Pending(title: "Removed apps", category: .leftovers, location: library, targets: targets,
                            safety: .checkFirst, movesToTrash: true))
     }
-    // Only for the real home folder; another account's data is shown, never guessed at in tests or other roots.
-    if home.deletingLastPathComponent().path == "/Users" {
-      let accounts = deletedAccountFolders().map {
-        PendingTarget(url: $0, name: "\($0.lastPathComponent) · account that was deleted", appID: nil, paths: [$0])
-      }
-      if !accounts.isEmpty {
-        found.append(Pending(title: "Folders of deleted accounts", category: .leftovers, location: home.deletingLastPathComponent(),
-                             targets: accounts, safety: .checkFirst, movesToTrash: true))
-      }
-    }
     return found
   }
 

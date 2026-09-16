@@ -1054,6 +1054,7 @@ struct ItemRow: View {
 
 struct InsightRow: View {
   let insight: Insight
+  @State private var copied = false
 
   var body: some View {
     HStack(spacing: 12) {
@@ -1064,6 +1065,16 @@ struct InsightRow: View {
       }
       Spacer(minLength: 8)
       Text(insight.bytes.map(format) ?? "Large").monospacedDigit().foregroundStyle(.secondary)
+      if let command = insight.command {
+        Button {
+          NSPasteboard.general.clearContents()
+          NSPasteboard.general.setString(command, forType: .string)
+          copied = true
+        } label: {
+          Label(copied ? "Copied" : "Copy Terminal command", systemImage: copied ? "checkmark" : "doc.on.doc")
+        }
+        .help(command)
+      }
       Button {
         NSWorkspace.shared.activateFileViewerSelecting([insight.url])
       } label: {

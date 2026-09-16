@@ -19,7 +19,7 @@ Every item is tagged, and only **Safe** items are selected by default:
 | Activity Logs | `~/Library/Logs` | Safe |
 | Trash | `~/.Trash` | Check first |
 | Email Attachments | Mail Downloads (moved to the Trash) | Check first |
-| Leftovers from Deleted Apps | Data of apps that are no longer installed (containers, settings, web data, grouped per app); hidden folders of known tools like Antigravity, Cursor, Windsurf, GitKraken; login items whose program is gone; home folders of deleted accounts (moved to the Trash with your password) | Check first |
+| Leftovers from Deleted Apps | Data of apps that are no longer installed (containers, settings, web data, grouped per app); hidden folders of known tools like Antigravity, Cursor, Windsurf, GitKraken; login items whose program is gone | Check first |
 | Duplicate Files | Real extra copies (not APFS clones) of files over 50 MB in Desktop, Documents, Downloads; the oldest copy is kept | Check first |
 | Developer Downloads | Homebrew, CocoaPods, pip, Yarn, Go, npm, Cargo, unused Codex installs, old Claude Code plugin versions; `~/.cache` and Gradle | Safe; `~/.cache` and Gradle take time |
 | Xcode | Simulator files (safe); build files, iPhone debugging files (take time); archived builds (check first, moved to the Trash) | Mixed |
@@ -30,7 +30,7 @@ Every item is tagged, and only **Safe** items are selected by default:
 
 **Uninstall Apps** removes an app together with the files it created (settings, caches, containers, login items), found by bundle ID. Folders that only match the app's name are marked Check first. The app is quit first and everything goes to the Trash.
 
-**Also taking space** explains big things Reclaim leaves alone, like Docker virtual machines, AI chat history, browser profiles and other accounts, and how to shrink them yourself.
+**Also taking space** explains big things Reclaim leaves alone, including files of deleted accounts (macOS only lets Terminal remove those; Reclaim offers the command to copy), like Docker virtual machines, AI chat history, browser profiles and other accounts, and how to shrink them yourself.
 
 Safety rules:
 - Removes what is *inside* cache and log locations, never the location itself; `node_modules`, `Pods` and Unity folders are removed whole.
