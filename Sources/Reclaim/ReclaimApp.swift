@@ -83,9 +83,11 @@ final class Model {
 
   private func measure() async {
     async let explained = Task.detached(priority: .utility) { await Cleaner().insights() }.value
+    async let installed = Task.detached(priority: .utility) { Cleaner().installedApps() }.value
     let results = await Task.detached(priority: .userInitiated) { await Cleaner().scan() }.value
     guard !Task.isCancelled else { return }
     insights = await explained
+    apps = await installed
     findings = results
     selection = Set(results.filter(\.preselected).flatMap { $0.targets.map(\.url) })
     scannedAt = Date()
@@ -365,17 +367,18 @@ struct HomeView: View {
             .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
       }
+      let ready = model.scannedAt != nil
       HStack(spacing: 14) {
-        ActionCard(symbol: "sparkles", title: "Quick Clean",
-                   detail: "Removes only safe files in one go. You'll see the total first.",
-                   highlighted: true, action: model.quickClean)
+        ActionCard(symbol: "sparkles", title: "Quick Clean", detail: "Only safe files, in one step.",
+                   colors: [Color(red: 0.20, green: 0.82, blue: 0.62), Color(red: 0.05, green: 0.52, blue: 0.62)],
+                   metric: ready ? "\(format(model.safeBytes)) ready" : nil, recommended: true, action: model.quickClean)
           .keyboardShortcut(.defaultAction)
-        ActionCard(symbol: "magnifyingglass", title: "Scan & Review",
-                   detail: "See everything Reclaim finds and choose what goes.",
-                   action: { model.scan() })
-        ActionCard(symbol: "xmark.app", title: "Uninstall Apps",
-                   detail: "Remove apps together with the files they leave behind.",
-                   action: model.openUninstall)
+        ActionCard(symbol: "magnifyingglass", title: "Scan & Review", detail: "See everything, pick what goes.",
+                   colors: [Color(red: 0.35, green: 0.62, blue: 1.0), Color(red: 0.36, green: 0.36, blue: 0.92)],
+                   metric: ready ? "\(format(model.foundBytes)) found" : nil, action: { model.scan() })
+        ActionCard(symbol: "trash", title: "Uninstall Apps", detail: "Apps and everything they left.",
+                   colors: [Color(red: 1.0, green: 0.45, blue: 0.55), Color(red: 0.93, green: 0.38, blue: 0.22)],
+                   metric: model.apps.isEmpty ? nil : "\(model.apps.count) apps", action: model.openUninstall)
       }
       .frame(maxWidth: 760)
       Spacer(minLength: 0)
@@ -422,7 +425,7 @@ struct DiskRing: View {
         // The reclaimable part sits at the end of the used arc, so it reads as "this much comes back".
         Circle()
           .trim(from: shown ? used - reclaim : used, to: shown ? used : used)
-          .stroke(Brand.gradient, style: StrokeStyle(lineWidth: 24, lineCap: .round))
+          .stroke(Brand.gradient, style: StrokeStyle(lineWidth: 20, lineCap: .butt))
           .rotationEffect(.degrees(-90))
           .shadow(color: Brand.teal.opacity(0.6), radius: 10)
         VStack(spacing: 2) {
@@ -469,46 +472,78 @@ struct LegendDot: View {
   }
 }
 
-/// A large, friendly choice on the home screen.
+/// One of the three choices on the home screen: icon, title, short line, and a live number.
 struct ActionCard: View {
   let symbol: String
   let title: String
   let detail: String
-  var highlighted = false
+  let colors: [Color]
+  /// Shown at the bottom once known, e.g. "8.6 GB ready".
+  var metric: String?
+  var recommended = false
   let action: () -> Void
   @State private var hovering = false
 
   var body: some View {
+    let tint = colors.first ?? Brand.teal
+    let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
     Button(action: action) {
-      VStack(alignment: .leading, spacing: 10) {
-        Image(systemName: symbol)
-          .font(.system(size: 20, weight: .semibold))
-          .foregroundStyle(highlighted ? AnyShapeStyle(.white) : AnyShapeStyle(Brand.gradient))
-          .frame(width: 42, height: 42)
-          .background(highlighted ? AnyShapeStyle(.white.opacity(0.2)) : AnyShapeStyle(Brand.teal.opacity(0.14)),
-                      in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        Spacer(minLength: 6)
-        Text(title).font(.system(size: 17, weight: .semibold, design: .rounded))
-        Text(detail).font(.callout)
-          .foregroundStyle(highlighted ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
-          .fixedSize(horizontal: false, vertical: true)
+      VStack(alignment: .leading, spacing: 0) {
+        HStack(alignment: .top) {
+          Image(systemName: symbol)
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 38, height: 38)
+            .background(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .shadow(color: tint.opacity(0.35), radius: 6, y: 3)
+          Spacer()
+          if recommended {
+            Text("Recommended")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(Brand.teal)
+              .padding(.horizontal, 8).padding(.vertical, 3)
+              .background(Brand.teal.opacity(0.14), in: Capsule())
+          }
+        }
+        Text(title).font(.system(size: 16, weight: .semibold, design: .rounded)).padding(.top, 14)
+        Text(detail).font(.callout).foregroundStyle(.secondary).padding(.top, 2)
+        Divider().padding(.vertical, 12).opacity(0.6)
+        HStack {
+          if let metric {
+            Text(metric).font(.callout.weight(.semibold)).monospacedDigit().foregroundStyle(tint)
+              .contentTransition(.numericText())
+          } else {
+            ProgressView().controlSize(.mini)
+          }
+          Spacer()
+          Image(systemName: "arrow.right")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(hovering ? .white : .secondary)
+            .frame(width: 24, height: 24)
+            .background(hovering ? AnyShapeStyle(tint) : AnyShapeStyle(.quaternary), in: Circle())
+            .offset(x: hovering ? 2 : 0)
+        }
       }
-      .foregroundStyle(highlighted ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-      .padding(18)
-      .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
+      .padding(16)
+      .frame(maxWidth: .infinity, alignment: .leading)
       .background {
-        RoundedRectangle(cornerRadius: 20, style: .continuous)
-          .fill(highlighted ? AnyShapeStyle(Brand.gradient) : AnyShapeStyle(.quaternary.opacity(0.55)))
-        RoundedRectangle(cornerRadius: 20, style: .continuous)
-          .strokeBorder(.white.opacity(highlighted ? 0.25 : 0.06))
+        shape.fill(.quaternary.opacity(hovering ? 0.7 : 0.45))
+        if recommended { shape.fill(Brand.teal.opacity(0.06)) }
       }
-      .shadow(color: (highlighted ? Brand.teal : .black).opacity(hovering ? 0.35 : 0.15), radius: hovering ? 18 : 8, y: hovering ? 8 : 3)
-      .scaleEffect(hovering ? 1.02 : 1)
-      .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+      .overlay {
+        shape.strokeBorder(recommended ? AnyShapeStyle(Brand.gradient.opacity(0.9)) : AnyShapeStyle(.white.opacity(hovering ? 0.14 : 0.07)),
+                           lineWidth: recommended ? 1.5 : 1)
+      }
+      .shadow(color: (recommended ? Brand.teal : .black).opacity(hovering ? 0.28 : 0.12), radius: hovering ? 16 : 8, y: hovering ? 7 : 3)
+      .offset(y: hovering ? -2 : 0)
+      .contentShape(shape)
+      .animation(.smooth(duration: 0.18), value: hovering)
+      .animation(.smooth, value: metric)
     }
     .buttonStyle(.plain)
     .onHover { hovering = $0 }
-    .animation(.smooth(duration: 0.2), value: hovering)
+    .accessibilityHint(metric ?? detail)
   }
 }
 
