@@ -2,7 +2,7 @@ import AppKit
 
 public enum Category: String, CaseIterable, Sendable {
   // Declaration order is the order in the app.
-  case caches, logs, trash, mail, developer, xcode, unity, nodeModules, pods
+  case caches, logs, trash, mail, leftovers, duplicates, developer, xcode, unity, nodeModules, pods
 
   public var title: String {
     switch self {
@@ -10,6 +10,8 @@ public enum Category: String, CaseIterable, Sendable {
     case .logs: "Activity Logs"
     case .trash: "Trash"
     case .mail: "Email Attachments"
+    case .leftovers: "Leftovers from Deleted Apps"
+    case .duplicates: "Duplicate Files"
     case .developer: "Developer Downloads"
     case .xcode: "Xcode"
     case .unity: "Unity Projects"
@@ -25,6 +27,8 @@ public enum Category: String, CaseIterable, Sendable {
     case .logs: "Records apps write about what they did. Nothing needs them."
     case .trash: "Things you already deleted. Emptying the Trash can't be undone."
     case .mail: "Attachments Mail saved. They download again when you open the email."
+    case .leftovers: "Settings and data left behind by apps you removed, and login items that no longer work."
+    case .duplicates: "Large files you have more than one real copy of. The oldest copy is kept."
     case .developer: "Downloads kept by developer tools. They download again when needed."
     case .xcode: "Files Xcode makes while building apps. Rebuilding them takes a while."
     case .unity: "Files Unity rebuilds when you reopen a project, and your exported builds."
@@ -39,6 +43,8 @@ public enum Category: String, CaseIterable, Sendable {
     case .logs: "list.bullet.rectangle"
     case .trash: "trash"
     case .mail: "paperclip"
+    case .leftovers: "app.dashed"
+    case .duplicates: "doc.on.doc"
     case .developer: "arrow.down.circle"
     case .xcode: "hammer"
     case .unity: "cube"
@@ -124,14 +130,14 @@ private struct Rule {
   var app: String? = nil
 }
 
-private struct PendingTarget: Sendable {
+struct PendingTarget: Sendable {
   let url: URL
   let name: String
   let appID: String?
   let paths: [URL]
 }
 
-private struct Pending: Sendable {
+struct Pending: Sendable {
   let title: String
   let category: Category
   let location: URL
@@ -142,10 +148,10 @@ private struct Pending: Sendable {
 
 public struct Cleaner: Sendable {
   public let home: URL
-  private let runningApps: Set<String>
+  let runningApps: Set<String>
   /// Without Full Disk Access, macOS prompts or shows "Data Access Blocked" when we touch
   /// other apps' data or Desktop/Documents/Downloads, so those locations are skipped.
-  private let fullDiskAccess: Bool
+  let fullDiskAccess: Bool
 
   public init(
     home: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -176,6 +182,8 @@ public struct Cleaner: Sendable {
     Rule(title: "npm", category: .developer, path: ".npm/_cacache"),
     Rule(title: "Rust (Cargo)", category: .developer, path: ".cargo/registry/cache"),
     Rule(title: "Gradle", category: .developer, path: ".gradle/caches", safety: .takesTime),
+    Rule(title: "Unused Codex installs", category: .developer, path: ".cache/codex-runtimes", perItem: true),
+    Rule(title: "Tool downloads", category: .developer, path: ".cache", safety: .takesTime, perItem: true),
     Rule(title: "Your apps", category: .caches, path: "Library/Caches", perItem: true),
     Rule(title: "Activity logs", category: .logs, path: "Library/Logs"),
     Rule(title: "Items in Trash", category: .trash, path: ".Trash", safety: .checkFirst, needsFullDiskAccess: true),
@@ -188,6 +196,7 @@ public struct Cleaner: Sendable {
   private static let protectedPrefixes = [
     "com.apple.FontRegistry", "com.apple.spotlight", "CloudKit", "com.apple.finder", "com.apple.bird",
     "com.apple.HomeKit", "com.apple.containermanagerd", "FamilyCircle", "JetBrains", "ms-playwright",
+    "codex-primary-runtime",
   ]
 
   /// Cache folders not named by their app's bundle ID.
@@ -218,10 +227,14 @@ public struct Cleaner: Sendable {
                              safety: rule.safety, movesToTrash: rule.movesToTrash))
     }
 
+    let apps = InstalledApps()
+    let leftovers = findLeftovers(apps: apps)
+    let leftoverPaths = Set(leftovers.flatMap(\.targets).flatMap(\.paths))
+
     // Apps from the App Store keep their caches inside their own container; one row per app.
     let containers = home.appendingPathComponent("Library/Containers")
     let containerTargets: [PendingTarget] = !fullDiskAccess ? [] : children(of: containers)
-      .filter { $0.lastPathComponent != "com.apple.mail" && isCleanable($0) }
+      .filter { $0.lastPathComponent != "com.apple.mail" && isCleanable($0) && !leftoverPaths.contains($0) }
       .compactMap { container in
         let caches = container.appendingPathComponent("Data/Library/Caches")
         let items = children(of: caches).filter(isCleanable)
@@ -234,6 +247,9 @@ public struct Cleaner: Sendable {
                              targets: containerTargets, safety: .safe, movesToTrash: false))
     }
 
+    pending += leftovers
+    pending += oldPluginVersions()
+    pending += findDuplicates()
     pending += findProjectArtifacts()
     if Task.isCancelled { return [] }
 
@@ -316,12 +332,12 @@ public struct Cleaner: Sendable {
     return found
   }
 
-  private func children(of url: URL) -> [URL] {
+  func children(of url: URL) -> [URL] {
     // Built from names so paths stay comparable with rule paths (no /var vs /private/var surprises).
     ((try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []).map { url.appendingPathComponent($0) }
   }
 
-  private func exists(_ url: URL) -> Bool {
+  func exists(_ url: URL) -> Bool {
     FileManager.default.fileExists(atPath: url.path)
   }
 
@@ -332,6 +348,7 @@ public struct Cleaner: Sendable {
         var failed = false
         for path in target.paths {
           do {
+            if path.deletingLastPathComponent().lastPathComponent == "LaunchAgents" { stopLoginItem(path) }
             if finding.movesToTrash {
               try FileManager.default.trashItem(at: path, resultingItemURL: nil)
             } else {

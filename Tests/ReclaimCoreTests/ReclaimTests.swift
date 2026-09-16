@@ -39,6 +39,79 @@ struct ReclaimTests {
   }
 
   @Test
+  func leftoversOnlyForRemovedAppsAndBrokenLoginItems() throws {
+    let home = try FixtureHome()
+    defer { home.remove() }
+    let lib = home.url.appendingPathComponent("Library")
+    for path in ["Containers/com.gone.app/data", "Containers/com.kept.app/data", "Containers/com.kept.app.ShareExtension/data",
+                 "Containers/com.apple.Notes/data", "Group Containers/ABCDE12345.group.com.kept.shared/data",
+                 "Group Containers/group.com.gone.shared/data", "Group Containers/243LU875E5.groups.com.apple.podcasts/data"] {
+      try home.write(lib.appendingPathComponent(path))
+    }
+    let agent = lib.appendingPathComponent("LaunchAgents/com.me.monitor.plist")
+    try FileManager.default.createDirectory(at: agent.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try (["Label": "com.me.monitor", "ProgramArguments": ["/nonexistent/monitor"]] as NSDictionary).write(to: agent)
+
+    let cleaner = Cleaner(home: home.url, runningApps: [], fullDiskAccess: true)
+    let found = Set(cleaner.findLeftovers(apps: InstalledApps(ids: ["com.kept.app"])).flatMap(\.targets).map(\.url.lastPathComponent))
+    #expect(found == ["com.gone.app", "group.com.gone.shared", "com.me.monitor.plist"])
+  }
+
+  @Test
+  func oldPluginVersionsKeepTheOneInUse() throws {
+    let home = try FixtureHome()
+    defer { home.remove() }
+    let cache = home.url.appendingPathComponent(".claude/plugins/cache/market/tool")
+    for version in ["old", "current"] { try home.write(cache.appendingPathComponent("\(version)/plugin.json")) }
+    let old = cache.appendingPathComponent("old")
+    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -30 * 86_400)], ofItemAtPath: old.path)
+    let json = ["plugins": ["tool@market": [["installPath": cache.appendingPathComponent("current").path]]]]
+    try JSONSerialization.data(withJSONObject: json).write(to: home.url.appendingPathComponent(".claude/plugins/installed_plugins.json"))
+
+    let targets = Cleaner(home: home.url, runningApps: [], fullDiskAccess: true).oldPluginVersions().flatMap(\.targets)
+    #expect(targets.map(\.url) == [old])
+  }
+
+  @Test
+  func duplicatesIgnoreClonesAndKeepTheOldest() throws {
+    let home = try FixtureHome()
+    defer { home.remove() }
+    let original = home.url.appendingPathComponent("Documents/report.pdf")
+    let copy = home.url.appendingPathComponent("Downloads/report.pdf")
+    let clone = home.url.appendingPathComponent("Desktop/report clone.pdf")
+    try home.write(original, bytes: 8192)
+    try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSinceNow: -86_400)], ofItemAtPath: original.path)
+    try FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(contentsOf: original).write(to: copy)  // same bytes, separate write: a real second copy
+    try FileManager.default.createDirectory(at: clone.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try FileManager.default.copyItem(at: original, to: clone)  // APFS clone: shares blocks
+
+    let found = Cleaner(home: home.url, runningApps: [], fullDiskAccess: true).findDuplicates(minimumBytes: 1024)
+    #expect(found.count == 1)
+    #expect(found.first?.location.lastPathComponent == "report.pdf")
+    #expect(found.first?.targets.map { $0.url.resolvingSymlinksInPath().path } == [copy.resolvingSymlinksInPath().path])
+  }
+
+  @Test
+  func uninstallPlanFindsFilesByBundleID() async throws {
+    let home = try FixtureHome()
+    defer { home.remove() }
+    let app = home.url.appendingPathComponent("Applications/Tool.app")
+    let lib = home.url.appendingPathComponent("Library")
+    for path in ["Application Support/com.maker.tool/db", "Caches/com.maker.tool/c", "Preferences/com.maker.tool.plist",
+                 "Containers/com.maker.tool.Widget/data", "Application Support/Tool/data", "Caches/com.maker.other/c"] {
+      try home.write(lib.appendingPathComponent(path))
+    }
+    try home.write(app.appendingPathComponent("Contents/MacOS/Tool"))
+
+    let plan = await Cleaner(home: home.url, runningApps: [], fullDiskAccess: true)
+      .uninstallPlan(for: InstalledApp(url: app, name: "Tool", bundleID: "com.maker.tool"))
+    let byTitle = Dictionary(uniqueKeysWithValues: plan.map { ($0.title, Set($0.targets.map(\.url.lastPathComponent))) })
+    #expect(byTitle["Tool"] == ["Tool.app", "com.maker.tool", "com.maker.tool.plist", "com.maker.tool.Widget"])
+    #expect(byTitle["Possibly related"] == ["Tool"])
+  }
+
+  @Test
   func friendlyNames() {
     #expect(friendlyName("MyApp-bxkqzyrcgqlmnbfqnmgmyfxkdvkh", appID: nil) == "MyApp")
     #expect(friendlyName("org.swift.swiftpm", appID: nil) == "swiftpm")
@@ -92,6 +165,11 @@ private struct FixtureHome {
       try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
       try Data(repeating: 1, count: 4096).write(to: file)
     }
+  }
+
+  func write(_ file: URL, bytes: Int = 4096) throws {
+    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data((0..<bytes).map { _ in UInt8.random(in: 0...255) }).write(to: file)
   }
 
   func remove() { try? FileManager.default.removeItem(at: url) }

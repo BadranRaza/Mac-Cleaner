@@ -19,10 +19,16 @@ Every item is tagged, and only **Safe** items are selected by default:
 | Activity Logs | `~/Library/Logs` | Safe |
 | Trash | `~/.Trash` | Check first |
 | Email Attachments | Mail Downloads (moved to the Trash) | Check first |
-| Developer Downloads | Homebrew, CocoaPods, pip, Yarn, Go, npm, Cargo; Gradle | Safe; Gradle takes time |
+| Leftovers from Deleted Apps | Containers of apps that are no longer installed; login items whose program is gone (turned off, moved to the Trash) | Check first |
+| Duplicate Files | Real extra copies (not APFS clones) of files over 50 MB in Desktop, Documents, Downloads; the oldest copy is kept | Check first |
+| Developer Downloads | Homebrew, CocoaPods, pip, Yarn, Go, npm, Cargo, unused Codex installs, old Claude Code plugin versions; `~/.cache` and Gradle | Safe; `~/.cache` and Gradle take time |
 | Xcode | Simulator files (safe); build files, iPhone debugging files (take time); archived builds (check first, moved to the Trash) | Mixed |
 | Unity Projects | `Library`, `Temp`, `Obj`, `Logs` (take time); `Build`/`Builds` (check first, moved to the Trash) | Mixed |
 | JavaScript Packages, iOS Libraries | Each project's `node_modules` / `Pods` | Takes time |
+
+**Uninstall Apps** removes an app together with the files it created (settings, caches, containers, login items), found by bundle ID. Folders that only match the app's name are marked Check first. The app is quit first and everything goes to the Trash.
+
+**Also taking space** explains big things Reclaim leaves alone, like Docker virtual machines, AI chat history, browser profiles and other accounts, and how to shrink them yourself.
 
 Safety rules:
 - Removes what is *inside* cache and log locations, never the location itself; `node_modules`, `Pods` and Unity folders are removed whole.

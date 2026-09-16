@@ -32,7 +32,17 @@ final class Model {
   var openGroup: FileGroup?
   var result: CleanResult?
   var hasFullDiskAccess = ReclaimCore.hasFullDiskAccess()
+  /// Big things Reclaim leaves alone, explained.
+  var insights: [Insight] = []
   private var scanTask: Task<Void, Never>?
+
+  // Uninstall
+  var showingUninstall = false
+  var apps: [InstalledApp] = []
+  var appToRemove: InstalledApp?
+  var plan: [Finding]?
+  var planSelection: Set<URL> = []
+  var uninstallMessage: String?
 
   var groups: [FileGroup] { FileGroup.allCases.filter { !findings(in: $0).isEmpty } }
   var selected: [Finding] { findings.map { $0.only(selection) }.filter { !$0.targets.isEmpty } }
@@ -46,8 +56,10 @@ final class Model {
     phase = .scanning
     openGroup = nil
     scanTask = Task {
+      async let explained = Task.detached(priority: .utility) { await Cleaner().insights() }.value
       let results = await Task.detached(priority: .userInitiated) { await Cleaner().scan() }.value
       guard !Task.isCancelled else { return }
+      insights = await explained
       findings = results
       selection = Set(results.filter(\.preselected).flatMap { $0.targets.map(\.url) })
       phase = .results
@@ -74,6 +86,46 @@ final class Model {
       set: { if $0 { self.selection.insert(url) } else { self.selection.remove(url) } }
     )
   }
+
+  func openUninstall() {
+    showingUninstall = true
+    appToRemove = nil
+    Task { apps = await Task.detached { Cleaner().installedApps() }.value }
+  }
+
+  func choose(_ app: InstalledApp) {
+    appToRemove = app
+    plan = nil
+    uninstallMessage = nil
+    Task {
+      let found = await Task.detached(priority: .userInitiated) { await Cleaner().uninstallPlan(for: app) }.value
+      guard appToRemove == app else { return }
+      plan = found
+      planSelection = Set(found.filter(\.preselected).flatMap { $0.targets.map(\.url) })
+    }
+  }
+
+  func uninstall() {
+    guard let app = appToRemove, let plan else { return }
+    let chosen = plan.map { $0.only(planSelection) }.filter { !$0.targets.isEmpty }
+    Task {
+      let result = await Cleaner.uninstall(app, plan: chosen)
+      if result.failures.isEmpty {
+        uninstallMessage = "\(app.name) and its files (\(format(result.trashedBytes))) are in the Trash. Empty the Trash to free the space."
+        apps.removeAll { $0 == app }
+        appToRemove = nil
+      } else {
+        uninstallMessage = result.failures.first
+      }
+    }
+  }
+
+  func planBinding(_ url: URL) -> Binding<Bool> {
+    Binding(
+      get: { self.planSelection.contains(url) },
+      set: { if $0 { self.planSelection.insert(url) } else { self.planSelection.remove(url) } }
+    )
+  }
 }
 
 func format(_ bytes: Int64) -> String {
@@ -96,6 +148,8 @@ extension FileGroup {
     case .logs: .gray
     case .trash: .pink
     case .mail: .cyan
+    case .leftovers: .purple
+    case .duplicates: .mint
     case .developer: .orange
     case .xcode: .blue
     case .unity: .indigo
@@ -159,6 +213,9 @@ struct ItemIcon: View {
   var body: some View {
     if let id = target.appID, let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
       Image(nsImage: NSWorkspace.shared.icon(forFile: app.path)).resizable().frame(width: 30, height: 30)
+    } else if group == .leftovers || group == .duplicates {
+      // Real Finder icons make loose files and folders recognizable.
+      Image(nsImage: NSWorkspace.shared.icon(forFile: target.url.path)).resizable().frame(width: 30, height: 30)
     } else {
       IconTile(symbol: group.symbol, color: group.color, size: 26).frame(width: 30, height: 30)
     }
@@ -222,12 +279,16 @@ struct ContentView: View {
 
   var body: some View {
     Group {
+      if model.showingUninstall {
+        UninstallView(model: model)
+      } else {
       switch model.phase {
       case .idle: HomeView(model: model)
       case .scanning, .cleaning: WorkingView(model: model)
       case .results where model.findings.isEmpty: TidyView(model: model)
       case .results: ResultsView(model: model)
       case .done: DoneView(model: model)
+      }
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -258,6 +319,8 @@ struct HomeView: View {
       Button("Start Scan", action: model.scan)
         .buttonStyle(PrimaryButton())
         .keyboardShortcut(.defaultAction)
+      Button("Uninstall an app…", action: model.openUninstall)
+        .buttonStyle(.plain).foregroundStyle(Brand.teal)
       Spacer()
     }
     .padding(32)
@@ -392,10 +455,20 @@ struct ResultsView: View {
           Text("Only safe items are selected. Open a group to see what's inside.").foregroundStyle(.secondary)
         }
         Spacer()
+        Button("Uninstall Apps", action: model.openUninstall)
         Button("Scan Again", action: model.scan)
       }
       if !model.hasFullDiskAccess { AccessBanner() }
       Card(items: model.groups) { GroupRow(model: model, group: $0) }
+      if !model.insights.isEmpty {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Also taking space").font(.headline)
+          Text("Reclaim leaves these alone. Here's what they are, and how to shrink them yourself.")
+            .font(.callout).foregroundStyle(.secondary)
+        }
+        .padding(.top, 8)
+        Card(items: model.insights) { InsightRow(insight: $0) }
+      }
       VStack(alignment: .leading, spacing: 6) {
         ForEach(Safety.allCases, id: \.self) { safety in
           HStack(spacing: 8) {
@@ -511,7 +584,7 @@ struct GroupDetail: View {
 
       ForEach(model.findings(in: group)) { finding in
         if finding.targets.count == 1 {
-          Card(items: finding.targets) { ItemRow(model: model, target: $0, group: group, finding: finding, showTag: true) }
+          Card(items: finding.targets) { ItemRow(isOn: model.binding($0.url), target: $0, group: group, finding: finding, showTag: true) }
         } else {
           VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
@@ -521,7 +594,7 @@ struct GroupDetail: View {
               Spacer()
               Text(format(finding.bytes)).font(.callout).foregroundStyle(.secondary).monospacedDigit()
             }
-            Card(items: finding.targets) { ItemRow(model: model, target: $0, group: group, finding: finding, showTag: false) }
+            Card(items: finding.targets) { ItemRow(isOn: model.binding($0.url), target: $0, group: group, finding: finding, showTag: false) }
           }
         }
       }
@@ -530,7 +603,7 @@ struct GroupDetail: View {
 }
 
 struct ItemRow: View {
-  let model: Model
+  @Binding var isOn: Bool
   let target: Target
   let group: FileGroup
   let finding: Finding
@@ -538,7 +611,7 @@ struct ItemRow: View {
 
   var body: some View {
     HStack(spacing: 10) {
-      Toggle(isOn: model.binding(target.url)) {
+      Toggle(isOn: $isOn) {
         HStack(spacing: 10) {
           ItemIcon(target: target, group: group)
           VStack(alignment: .leading, spacing: 1) {
@@ -562,5 +635,158 @@ struct ItemRow: View {
       .help("Show in Finder")
     }
     .help((target.url.path as NSString).abbreviatingWithTildeInPath)
+  }
+}
+
+struct InsightRow: View {
+  let insight: Insight
+
+  var body: some View {
+    HStack(spacing: 12) {
+      IconTile(symbol: "info", color: .gray, size: 28)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(insight.title)
+        Text(insight.advice).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      }
+      Spacer(minLength: 8)
+      Text(insight.bytes.map(format) ?? "Large").monospacedDigit().foregroundStyle(.secondary)
+      Button {
+        NSWorkspace.shared.activateFileViewerSelecting([insight.url])
+      } label: {
+        Image(systemName: "folder")
+      }
+      .buttonStyle(.borderless)
+      .help("Show in Finder")
+    }
+  }
+}
+
+// MARK: - Uninstall
+
+struct UninstallView: View {
+  @Bindable var model: Model
+  @State private var search = ""
+  @State private var confirming = false
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 18) {
+        Button {
+          withAnimation(.smooth) {
+            if model.appToRemove != nil { model.appToRemove = nil } else { model.showingUninstall = false }
+          }
+        } label: {
+          Label(model.appToRemove == nil ? "Back" : "All apps", systemImage: "chevron.left").font(.callout.weight(.medium))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Brand.teal)
+        .keyboardShortcut(.cancelAction)
+
+        if let message = model.uninstallMessage {
+          Label(message, systemImage: "checkmark.circle.fill")
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Brand.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+
+        if let app = model.appToRemove { planView(app) } else { appList }
+      }
+      .padding(.horizontal, 28).padding(.top, 36).padding(.bottom, 20)
+      .frame(maxWidth: 760)
+      .frame(maxWidth: .infinity)
+    }
+    .safeAreaInset(edge: .bottom) {
+      if let app = model.appToRemove, model.plan != nil { actionBar(app) }
+    }
+  }
+
+  private var appList: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Uninstall Apps").font(.system(size: 32, weight: .bold, design: .rounded))
+        Text("Removes an app and the files it left on your Mac. Everything goes to the Trash first.")
+          .foregroundStyle(.secondary)
+      }
+      TextField("Search apps", text: $search).textFieldStyle(.roundedBorder).controlSize(.large)
+      let apps = model.apps.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
+      if model.apps.isEmpty {
+        ProgressView().frame(maxWidth: .infinity)
+      } else {
+        Card(items: apps) { app in
+          Button {
+            withAnimation(.smooth) { model.choose(app) }
+          } label: {
+            HStack(spacing: 12) {
+              Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path)).resizable().frame(width: 32, height: 32)
+              VStack(alignment: .leading, spacing: 1) {
+                Text(app.name)
+                Text(app.lastUsed.map { "Last opened \($0.formatted(.relative(presentation: .named)))" } ?? "Never opened")
+                  .font(.caption).foregroundStyle(.secondary)
+              }
+              Spacer()
+              Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+        }
+      }
+    }
+  }
+
+  private func planView(_ app: InstalledApp) -> some View {
+    VStack(alignment: .leading, spacing: 18) {
+      HStack(spacing: 14) {
+        Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path)).resizable().frame(width: 56, height: 56)
+        VStack(alignment: .leading, spacing: 4) {
+          Text(app.name).font(.system(size: 26, weight: .bold, design: .rounded))
+          Text("The app and the files it created. Anything marked Check first only matches by name.")
+            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      if let plan = model.plan {
+        ForEach(plan) { finding in
+          VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+              Text(finding.title).font(.headline)
+              SafetyTag(safety: finding.safety)
+              Spacer()
+              Text(format(finding.bytes)).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+            }
+            Card(items: finding.targets) {
+              ItemRow(isOn: model.planBinding($0.url), target: $0, group: .leftovers, finding: finding, showTag: false)
+            }
+          }
+        }
+      } else {
+        HStack { ProgressView(); Text("Finding its files…").foregroundStyle(.secondary) }
+      }
+    }
+  }
+
+  private func actionBar(_ app: InstalledApp) -> some View {
+    let bytes = (model.plan ?? []).flatMap(\.targets).filter { model.planSelection.contains($0.url) }.reduce(Int64(0)) { $0 + $1.bytes }
+    return HStack(spacing: 14) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text("\(format(bytes)) selected").font(.title3.bold()).monospacedDigit()
+        Text("\(model.planSelection.count) item\(model.planSelection.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+      }
+      Spacer()
+      Button {
+        confirming = true
+      } label: {
+        Label("Uninstall", systemImage: "trash")
+      }
+      .buttonStyle(PrimaryButton())
+      .disabled(model.planSelection.isEmpty)
+      .keyboardShortcut(.defaultAction)
+      .confirmationDialog("Uninstall \(app.name)?", isPresented: $confirming) {
+        Button("Move to Trash", role: .destructive, action: model.uninstall)
+      } message: {
+        Text("\(app.name) will quit, and the selected items move to the Trash. You can put them back from the Trash.")
+      }
+    }
+    .padding(.horizontal, 28).padding(.vertical, 14)
+    .background(.bar)
   }
 }
