@@ -33,6 +33,8 @@ final class Model {
   var result: CleanResult?
   /// Space freed since the app opened, and moved to the Trash (freed once the Trash is emptied).
   var sessionFreed: Int64 = 0
+  /// Free space when the app opened, for the "where you started" view on the ring.
+  let startFree = Disk.now().free
   var sessionTrashed: Int64 = 0
   /// Freed across all sessions.
   var lifetimeFreed = Int64(UserDefaults.standard.integer(forKey: "lifetimeFreed"))
@@ -370,7 +372,8 @@ struct HomeView: View {
       if !model.hasFullDiskAccess { AccessBanner().frame(maxWidth: 640) }
       Spacer(minLength: 0)
       HStack(spacing: 40) {
-        DiskRing(safe: model.scannedAt == nil ? nil : model.safeBytes,
+        DiskRing(disk: Disk.now(), startFree: model.startFree, reclaimed: model.sessionFreed,
+                 safe: model.scannedAt == nil ? nil : model.safeBytes,
                  more: model.foundBytes - model.safeBytes, checking: model.isEstimating)
         VStack(alignment: .leading, spacing: 10) {
           HStack(spacing: 8) {
@@ -418,65 +421,174 @@ struct HomeView: View {
   }
 }
 
-/// Ring showing used space, the part of it Quick Clean can reclaim, and free space.
+struct Disk {
+  let total: Int64
+  let free: Int64
+
+  static func now() -> Disk {
+    let values = try? URL(fileURLWithPath: NSHomeDirectory())
+      .resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey])
+    return Disk(total: Int64(values?.volumeTotalCapacity ?? 1), free: values?.volumeAvailableCapacityForImportantUsage ?? 0)
+  }
+}
+
+/// Interactive ring: used space, what can be reclaimed, what was reclaimed this session, and free space.
+/// Hover a part of the ring or the legend to see its details in the middle.
 struct DiskRing: View {
+  enum Part: CaseIterable { case used, reclaimable, reclaimed, free }
+
+  let disk: Disk
+  let startFree: Int64
+  /// Freed this session.
+  let reclaimed: Int64
   /// Safe bytes Quick Clean would free; nil until the background check finishes.
   var safe: Int64?
-  /// More that could go after review.
   var more: Int64 = 0
   var checking = false
   @State private var shown = false
-  private let volume = try? URL(fileURLWithPath: NSHomeDirectory())
-    .resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey])
+  @State private var hovered: Part?
+
+  private let size: CGFloat = 190
+  private let width: CGFloat = 18
 
   var body: some View {
-    let total = Double(max(1, volume?.volumeTotalCapacity ?? 1))
-    let free = Double(volume?.volumeAvailableCapacityForImportantUsage ?? 0)
-    let used = min(1, max(0, (total - free) / total))
-    let reclaim = min(used, Double(safe ?? 0) / total)
+    let total = Double(max(1, disk.total))
+    let used = min(1, max(0, Double(disk.total - disk.free) / total))
+    // Small amounts get a minimum visible length so they don't vanish on a big disk.
+    let visible = { (bytes: Int64) in bytes > 0 ? max(0.012, Double(bytes) / total) : 0 }
+    let canReclaim = min(used, visible(safe ?? 0))
+    // Space freed this session now sits in "free", right after used space: where it came from.
+    let wasReclaimed = min(1 - used, visible(reclaimed))
+    let ranges: [Part: ClosedRange<Double>] = [
+      .used: 0...used,
+      .reclaimable: (used - canReclaim)...used,
+      .reclaimed: used...(used + wasReclaimed),
+      .free: (used + wasReclaimed)...1,
+    ]
+
     VStack(spacing: 14) {
       ZStack {
-        Circle().stroke(.quaternary, lineWidth: 16)
-        Circle()
-          .trim(from: 0, to: shown ? used : 0)
-          .stroke(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 16, lineCap: .butt))
-          .rotationEffect(.degrees(-90))
-        // The reclaimable part sits at the end of the used arc, so it reads as "this much comes back".
-        Circle()
-          .trim(from: shown ? used - reclaim : used, to: shown ? used : used)
-          .stroke(Brand.gradient, style: StrokeStyle(lineWidth: 20, lineCap: .butt))
-          .rotationEffect(.degrees(-90))
-          .shadow(color: Brand.teal.opacity(0.6), radius: 10)
-        VStack(spacing: 2) {
-          Text(format(Int64(free))).font(.system(size: 26, weight: .bold, design: .rounded)).monospacedDigit()
-          Text("free of \(format(Int64(total)))").font(.caption).foregroundStyle(.secondary)
-          if let safe, safe > 0 {
-            Text("+\(format(safe)) after cleaning").font(.caption.weight(.semibold)).foregroundStyle(Brand.teal)
-              .contentTransition(.numericText())
-              .padding(.top, 2)
-          } else if checking {
-            ProgressView().controlSize(.mini).padding(.top, 4)
-          }
-        }
+        Circle().stroke(Color.secondary.opacity(0.14), lineWidth: width)
+          .opacity(dim(.free))
+        arc(ranges[.used]!, style: AnyShapeStyle(Color.secondary.opacity(0.45)), part: .used)
+        if canReclaim > 0 { arc(ranges[.reclaimable]!, style: AnyShapeStyle(Brand.gradient), part: .reclaimable, glow: Brand.teal) }
+        if wasReclaimed > 0 { arc(ranges[.reclaimed]!, style: AnyShapeStyle(Reclaimed.gradient), part: .reclaimed, glow: Reclaimed.color) }
+        center
       }
-      .frame(width: 180, height: 180)
+      .frame(width: size, height: size)
+      .contentShape(Circle())
+      .onContinuousHover { phase in
+        guard case .active(let point) = phase else { hovered = nil; return }
+        hovered = part(at: point, ranges: ranges)
+      }
       .animation(.smooth(duration: 0.9), value: safe)
+      .animation(.smooth(duration: 0.9), value: reclaimed)
+      .animation(.smooth(duration: 0.2), value: hovered)
 
-      VStack(spacing: 4) {
+      VStack(spacing: 6) {
         HStack(spacing: 12) {
-          LegendDot(color: .secondary.opacity(0.45), label: "Used")
-          LegendDot(color: Brand.teal, label: "Can reclaim")
-          LegendDot(color: .secondary.opacity(0.18), label: "Free")
+          legend(.used, "Used", Color.secondary.opacity(0.45))
+          legend(.reclaimable, "Can reclaim", Brand.teal)
+          if reclaimed > 0 { legend(.reclaimed, "Reclaimed", Reclaimed.color) }
+          legend(.free, "Free", Color.secondary.opacity(0.2))
         }
-        Text(safe == nil ? "Checking what can be reclaimed…"
-             : more > 0 ? "Up to \(format(more)) more after review" : " ")
-          .font(.caption2).foregroundStyle(.tertiary)
+        if reclaimed > 0 {
+          HStack(spacing: 6) {
+            Text(format(startFree)).foregroundStyle(.secondary)
+            Image(systemName: "arrow.right").foregroundStyle(Reclaimed.color)
+            Text("\(format(disk.free)) free").foregroundStyle(Reclaimed.color).fontWeight(.semibold)
+          }
+          .font(.caption)
+          .help("Free space when you opened Reclaim, and now")
+        } else {
+          Text(safe == nil ? "Checking what can be reclaimed…"
+               : more > 0 ? "Up to \(format(more)) more after review" : " ")
+            .font(.caption2).foregroundStyle(.tertiary)
+        }
       }
     }
     .onAppear { withAnimation(.smooth(duration: 1.1)) { shown = true } }
     .accessibilityElement(children: .combine)
-    .accessibilityLabel("\(format(Int64(free))) free of \(format(Int64(total)))" + (safe.map { ", \(format($0)) can be reclaimed" } ?? ""))
+    .accessibilityLabel("\(format(disk.free)) free of \(format(disk.total))"
+                        + (safe.map { ", \(format($0)) can be reclaimed" } ?? "")
+                        + (reclaimed > 0 ? ", \(format(reclaimed)) reclaimed this session" : ""))
   }
+
+  @ViewBuilder private var center: some View {
+    VStack(spacing: 2) {
+      switch hovered {
+      case .used:
+        headline(format(disk.total - disk.free)); caption("used")
+      case .reclaimable:
+        headline(format(safe ?? 0), Brand.teal); caption("safe to reclaim now")
+      case .reclaimed:
+        headline(format(reclaimed), Reclaimed.color); caption("reclaimed this session")
+        caption("from \(format(startFree)) free")
+      case .free:
+        headline(format(disk.free)); caption("free now")
+      case nil:
+        headline(format(disk.free)); caption("free of \(format(disk.total))")
+        if reclaimed > 0 {
+          Text("+\(format(reclaimed)) this session").font(.caption.weight(.semibold)).foregroundStyle(Reclaimed.color).padding(.top, 2)
+        } else if let safe, safe > 0 {
+          Text("+\(format(safe)) after cleaning").font(.caption.weight(.semibold)).foregroundStyle(Brand.teal).padding(.top, 2)
+        } else if checking {
+          ProgressView().controlSize(.mini).padding(.top, 4)
+        }
+      }
+    }
+    .multilineTextAlignment(.center)
+    .frame(width: size - width * 2 - 16)
+    .contentTransition(.numericText())
+    .allowsHitTesting(false)
+  }
+
+  private func headline(_ text: String, _ color: Color = .primary) -> some View {
+    Text(text).font(.system(size: 26, weight: .bold, design: .rounded)).monospacedDigit().foregroundStyle(color)
+      .minimumScaleFactor(0.7).lineLimit(1)
+  }
+
+  private func caption(_ text: String) -> some View {
+    Text(text).font(.caption).foregroundStyle(.secondary)
+  }
+
+  private func arc(_ range: ClosedRange<Double>, style: AnyShapeStyle, part: Part, glow: Color? = nil) -> some View {
+    Circle()
+      .trim(from: shown ? range.lowerBound : 0, to: shown ? range.upperBound : 0)
+      .stroke(style, style: StrokeStyle(lineWidth: hovered == part ? width + 6 : width, lineCap: .butt))
+      .rotationEffect(.degrees(-90))
+      .shadow(color: (glow ?? .clear).opacity(hovered == part ? 0.8 : 0.5), radius: glow == nil ? 0 : 9)
+      .opacity(dim(part))
+  }
+
+  private func dim(_ part: Part) -> Double { hovered == nil || hovered == part ? 1 : 0.35 }
+
+  private func legend(_ part: Part, _ label: String, _ color: Color) -> some View {
+    LegendDot(color: color, label: label)
+      .opacity(dim(part) == 1 ? 1 : 0.5)
+      .onHover { hovered = $0 ? part : nil }
+  }
+
+  /// Which part of the ring is under the pointer. Tiny arcs get a wider hit area so they stay hoverable.
+  private func part(at point: CGPoint, ranges: [Part: ClosedRange<Double>]) -> Part? {
+    let dx = point.x - size / 2, dy = point.y - size / 2
+    let distance = (dx * dx + dy * dy).squareRoot()
+    guard abs(distance - (size - width) / 2) < width else { return nil }
+    var angle = atan2(dx, -dy) / (2 * .pi)  // 0 at the top, clockwise
+    if angle < 0 { angle += 1 }
+    let slack = 0.015
+    for part in [Part.reclaimed, .reclaimable] {
+      if let range = ranges[part], range.upperBound > range.lowerBound,
+         angle >= range.lowerBound - slack, angle <= range.upperBound + slack { return part }
+    }
+    return angle <= ranges[.used]!.upperBound ? .used : .free
+  }
+}
+
+enum Reclaimed {
+  static let color = Color(red: 0.42, green: 0.90, blue: 0.45)
+  static let gradient = LinearGradient(colors: [Color(red: 0.62, green: 0.95, blue: 0.40), Color(red: 0.25, green: 0.80, blue: 0.50)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
 }
 
 struct LegendDot: View {
