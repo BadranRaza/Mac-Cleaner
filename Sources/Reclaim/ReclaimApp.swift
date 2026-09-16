@@ -70,8 +70,11 @@ final class Model {
   func quickClean() { scan(quick: true) }
 
   func goHome() {
-    phase = .idle
+    if phase != .scanning, phase != .cleaning { phase = .idle }
     openGroup = nil
+    showingUninstall = false
+    appToRemove = nil
+    uninstallMessage = nil
   }
 
   func selectedBytes(in group: FileGroup) -> Int64 {
@@ -359,6 +362,7 @@ struct ContentView: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .overlay(alignment: .top) { NavBar(model: model) }
     .background(.background)
     .animation(.smooth, value: model.phase)
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -747,7 +751,6 @@ struct QuickReviewView: View {
           .keyboardShortcut(.defaultAction)
         }
       }
-      Button("Cancel", action: model.goHome).buttonStyle(.plain).foregroundStyle(.secondary)
     }
     .padding(32)
   }
@@ -852,7 +855,7 @@ struct ResultsView: View {
       Group {
         if let group = model.openGroup { GroupDetail(model: model, group: group) } else { overview }
       }
-      .padding(.horizontal, 28).padding(.top, 36).padding(.bottom, 20)
+      .padding(.horizontal, 28).padding(.top, 70).padding(.bottom, 20)
       .frame(maxWidth: Layout.readable)
       .frame(maxWidth: .infinity)
     }
@@ -975,15 +978,6 @@ struct GroupDetail: View {
     let urls = model.urls(in: group)
     let allSelected = urls.allSatisfy(model.selection.contains)
     VStack(alignment: .leading, spacing: 18) {
-      Button {
-        withAnimation(.smooth) { model.openGroup = nil }
-      } label: {
-        Label("All groups", systemImage: "chevron.left").font(.callout.weight(.medium))
-      }
-      .buttonStyle(.plain)
-      .foregroundStyle(Brand.teal)
-      .keyboardShortcut(.cancelAction)
-
       HStack(alignment: .top, spacing: 14) {
         IconTile(symbol: group.symbol, color: group.color, size: 48)
         VStack(alignment: .leading, spacing: 4) {
@@ -1096,17 +1090,6 @@ struct UninstallView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 18) {
-        Button {
-          withAnimation(.smooth) {
-            if model.appToRemove != nil { model.appToRemove = nil } else { model.showingUninstall = false }
-          }
-        } label: {
-          Label(model.appToRemove == nil ? "Back" : "All apps", systemImage: "chevron.left").font(.callout.weight(.medium))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Brand.teal)
-        .keyboardShortcut(.cancelAction)
-
         if let message = model.uninstallMessage {
           Label {
             Text(message.text)
@@ -1121,7 +1104,7 @@ struct UninstallView: View {
 
         if let app = model.appToRemove { planView(app) } else { appList }
       }
-      .padding(.horizontal, 28).padding(.top, 36).padding(.bottom, 20)
+      .padding(.horizontal, 28).padding(.top, 70).padding(.bottom, 20)
       .frame(maxWidth: Layout.readable)
       .frame(maxWidth: .infinity)
     }
@@ -1243,5 +1226,48 @@ struct SessionBadge: View {
       .background(Brand.teal.opacity(0.12), in: Capsule())
       .contentTransition(.numericText())
       .help("Space in the Trash is freed when you empty the Trash.")
+  }
+}
+
+/// The same navigation on every screen but Home: back one step on the left (Esc), Home on the right when deeper.
+struct NavBar: View {
+  let model: Model
+
+  var body: some View {
+    let (backTitle, back, deep): (String, (() -> Void)?, Bool) = {
+      if model.showingUninstall {
+        return model.appToRemove == nil ? ("Home", model.goHome, false) : ("All apps", { model.appToRemove = nil }, true)
+      }
+      switch model.phase {
+      case .idle, .scanning, .cleaning: return ("", nil, false)
+      case .results where model.openGroup != nil: return ("All groups", { model.openGroup = nil }, true)
+      case .results, .quickReview, .done: return ("Home", model.goHome, false)
+      }
+    }()
+
+    if let back {
+      HStack {
+        Button {
+          withAnimation(.smooth) { back() }
+        } label: {
+          Label(backTitle, systemImage: "chevron.left")
+        }
+        .keyboardShortcut(.cancelAction)
+        Spacer()
+        if deep {
+          Button {
+            withAnimation(.smooth) { model.goHome() }
+          } label: {
+            Label("Home", systemImage: "house")
+          }
+        }
+      }
+      .buttonStyle(.plain)
+      .font(.callout.weight(.medium))
+      .foregroundStyle(Brand.teal)
+      .padding(.horizontal, 28)
+      .frame(maxWidth: Layout.readable)
+      .padding(.top, 36)
+    }
   }
 }
