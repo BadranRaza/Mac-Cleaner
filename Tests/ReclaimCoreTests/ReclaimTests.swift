@@ -12,13 +12,17 @@ struct ReclaimTests {
     let byTitle = Dictionary(uniqueKeysWithValues: findings.map { ($0.title, $0) })
 
     // Nested rule owns its folder; the outer rule skips it.
-    #expect(byTitle["Homebrew"]?.targets.map(\.url.lastPathComponent) == ["bottle.tar.gz"])
-    let userCaches = Set(byTitle["User caches"]?.targets.map(\.url.lastPathComponent) ?? [])
+    // Grouped: one row for the whole folder, removing what's inside it.
+    #expect(byTitle["Homebrew"]?.targets.flatMap(\.paths).map(\.lastPathComponent) == ["bottle.tar.gz"])
+    #expect(byTitle["Homebrew"]?.safety == .safe)
+    let userCaches = Set(byTitle["Your apps"]?.targets.map(\.url.lastPathComponent) ?? [])
     #expect(userCaches == ["com.example.app"])  // no Homebrew, protected CloudKit, or running apps
 
     #expect(byTitle["web"]?.category == .nodeModules)
-    #expect(byTitle["Game · caches"]?.targets.map(\.url.lastPathComponent) == ["Library"])
-    #expect(byTitle["Game · builds"]?.movesToTrash == true)
+    #expect(byTitle["web"]?.preselected == false)
+    #expect(byTitle["Game · rebuildable files"]?.targets.map(\.url.lastPathComponent) == ["Library"])
+    #expect(byTitle["Game · exported builds"]?.safety == .checkFirst)
+    #expect(byTitle["Game · exported builds"]?.movesToTrash == true)
     #expect(Set(findings.map(\.id)).count == findings.count)
     #expect(!findings.contains { $0.location.path.contains("Application Support") })
     #expect(byTitle["Homebrew"]?.bytes ?? 0 >= 4096)
@@ -31,7 +35,14 @@ struct ReclaimTests {
 
     let findings = await Cleaner(home: home.url, runningApps: [], fullDiskAccess: false).scan()
     #expect(!findings.contains { $0.location.path.contains("/Documents/") || $0.category == .trash })
-    #expect(findings.contains { $0.title == "User caches" })
+    #expect(findings.contains { $0.title == "Your apps" })
+  }
+
+  @Test
+  func friendlyNames() {
+    #expect(friendlyName("MyApp-bxkqzyrcgqlmnbfqnmgmyfxkdvkh", appID: nil) == "MyApp")
+    #expect(friendlyName("org.swift.swiftpm", appID: nil) == "swiftpm")
+    #expect(friendlyName("com.apple.finder", appID: "com.apple.finder") == "Finder")
   }
 
   @Test
@@ -42,7 +53,7 @@ struct ReclaimTests {
     let caches = home.url.appendingPathComponent("Library/Caches")
     let kept = caches.appendingPathComponent("com.running.app")
     let findings = await Cleaner(home: home.url, runningApps: [], fullDiskAccess: true).scan()
-      .filter { $0.title == "User caches" }
+      .filter { $0.title == "Your apps" }
       .map { finding in finding.only(Set(finding.targets.map(\.url)).subtracting([kept])) }
     let result = Cleaner.clean(findings)
 

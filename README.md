@@ -6,25 +6,27 @@ A small, native macOS app that finds caches, logs and build leftovers you can sa
 
 ## What it cleans
 
-Only fixed, well-known locations in your home folder. Nothing is matched by name across the disk.
+Only fixed, well-known locations in your home folder, in plain language, with the owning app's name and icon where possible.
+Every item is tagged, and only **Safe** items are selected by default:
 
-| Category | Locations | Selected by default |
+- **Safe**: comes back by itself.
+- **Takes time**: comes back, but rebuilding or downloading it takes a while.
+- **Check first**: may be your only copy.
+
+| Group | What it is | Tag |
 |---|---|---|
-| App Caches | `~/Library/Caches/*`, `~/Library/Containers/*/Data/Library/Caches/*` | Yes |
-| Logs | `~/Library/Logs/*` | Yes |
-| Developer Caches | Homebrew, CocoaPods, pip, Yarn, Go build, npm, Cargo | Yes (Gradle: no) |
-| Xcode | Simulator caches (yes); DerivedData, Device Support, Archives (no) | Mixed |
-| Unity | Per project: `Library`, `Temp`, `Obj`, `Logs`; `Build`/`Builds` go to the Trash | No |
-| node_modules, CocoaPods Pods | Each project's `node_modules` / `Pods`, listed with its path | No |
-| Trash, Mail Attachments | `~/.Trash`, Mail Downloads | No |
-
-Every item is listed with its path and size and can be kept or removed on its own.
+| Temporary App Files | `~/Library/Caches/*`, App Store apps' caches | Safe |
+| Activity Logs | `~/Library/Logs` | Safe |
+| Trash | `~/.Trash` | Check first |
+| Email Attachments | Mail Downloads (moved to the Trash) | Check first |
+| Developer Downloads | Homebrew, CocoaPods, pip, Yarn, Go, npm, Cargo; Gradle | Safe; Gradle takes time |
+| Xcode | Simulator files (safe); build files, iPhone debugging files (take time); archived builds (check first, moved to the Trash) | Mixed |
+| Unity Projects | `Library`, `Temp`, `Obj`, `Logs` (take time); `Build`/`Builds` (check first, moved to the Trash) | Mixed |
+| JavaScript Packages, iOS Libraries | Each project's `node_modules` / `Pods` | Takes time |
 
 Safety rules:
 - Removes what is *inside* cache and log locations, never the location itself; `node_modules`, `Pods` and Unity folders are removed whole.
-- Skips caches that hold state (CloudKit, Spotlight, FontRegistry, Finder, iCloud) or are costly to rebuild (JetBrains, Playwright).
-- Skips caches of apps that are running.
-- Xcode Archives, Unity builds and Mail attachments go to the Trash; everything else is deleted permanently, since the Trash frees no space.
+- Skips app data in `~/Library/Application Support`, caches that hold state (CloudKit, Spotlight, FontRegistry, Finder, iCloud) or are costly to rebuild (JetBrains, Playwright), and caches of running apps.
 - Sizes are allocated bytes on disk with hard links counted once. APFS clones can make them an upper bound.
 
 Grant **Full Disk Access** (System Settings → Privacy & Security) to include Trash, Mail and sandboxed app caches. Reclaim works without it and tells you what it skipped.

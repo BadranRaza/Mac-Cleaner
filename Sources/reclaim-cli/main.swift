@@ -10,7 +10,10 @@ if !hasFullDiskAccess() {
 }
 for finding in findings {
   let mark = finding.preselected ? "●" : "○"
-  print("\(mark) \(size(finding.bytes).padding(toLength: 10, withPad: " ", startingAt: 0)) \(finding.category.title) · \(finding.title)")
-  print("    \(finding.location.path)")
+  print("\(mark) \(size(finding.bytes).padding(toLength: 10, withPad: " ", startingAt: 0)) \(finding.category.title) · \(finding.title) [\(finding.safety.title)]")
+  for target in finding.targets.prefix(5) {
+    print("    \(target.name.padding(toLength: 28, withPad: " ", startingAt: 0)) \(size(target.bytes))")
+  }
+  if finding.targets.count > 5 { print("    … \(finding.targets.count - 5) more") }
 }
 print("\nTotal: up to \(size(findings.reduce(0) { $0 + $1.bytes })) (● selected by default)")

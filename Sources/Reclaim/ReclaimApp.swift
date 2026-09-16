@@ -2,15 +2,18 @@ import AppKit
 import ReclaimCore
 import SwiftUI
 
+/// ReclaimCore.Category, named to avoid AppKit's `Category`.
+typealias FileGroup = ReclaimCore.Category
+
 @main
 struct ReclaimApp: App {
   var body: some Scene {
     Window("Reclaim", id: "main") {
       ContentView()
-        .frame(minWidth: 820, minHeight: 560)
+        .frame(minWidth: 640, minHeight: 540)
         .tint(Brand.teal)
     }
-    .defaultSize(width: 980, height: 680)
+    .defaultSize(width: 820, height: 660)
     .windowStyle(.hiddenTitleBar)
   }
 }
@@ -23,30 +26,30 @@ final class Model {
 
   var phase = Phase.idle
   var findings: [Finding] = []
-  /// Selected target URLs; each item can be kept or removed on its own.
+  /// Selected item URLs; each item can be kept or removed on its own.
   var selection: Set<URL> = []
-  var category: ReclaimCore.Category?
+  /// The group being reviewed, or nil for the overview.
+  var openGroup: FileGroup?
   var result: CleanResult?
   var hasFullDiskAccess = ReclaimCore.hasFullDiskAccess()
   private var scanTask: Task<Void, Never>?
 
-  var categories: [ReclaimCore.Category] { ReclaimCore.Category.allCases.filter { !items(in: $0).isEmpty } }
+  var groups: [FileGroup] { FileGroup.allCases.filter { !findings(in: $0).isEmpty } }
   var selected: [Finding] { findings.map { $0.only(selection) }.filter { !$0.targets.isEmpty } }
   var selectedBytes: Int64 { selected.reduce(0) { $0 + $1.bytes } }
   var foundBytes: Int64 { findings.reduce(0) { $0 + $1.bytes } }
 
-  func items(in category: ReclaimCore.Category) -> [Finding] { findings.filter { $0.category == category } }
-  func urls(in category: ReclaimCore.Category) -> [URL] { items(in: category).flatMap { $0.targets.map(\.url) } }
-  func bytes(in category: ReclaimCore.Category) -> Int64 { items(in: category).reduce(0) { $0 + $1.bytes } }
+  func findings(in group: FileGroup) -> [Finding] { findings.filter { $0.category == group } }
+  func urls(in group: FileGroup) -> [URL] { findings(in: group).flatMap { $0.targets.map(\.url) } }
 
   func scan() {
     phase = .scanning
+    openGroup = nil
     scanTask = Task {
       let results = await Task.detached(priority: .userInitiated) { await Cleaner().scan() }.value
       guard !Task.isCancelled else { return }
       findings = results
       selection = Set(results.filter(\.preselected).flatMap { $0.targets.map(\.url) })
-      if category.map({ !categories.contains($0) }) ?? true { category = categories.first }
       phase = .results
     }
   }
@@ -64,6 +67,13 @@ final class Model {
       phase = .done
     }
   }
+
+  func binding(_ url: URL) -> Binding<Bool> {
+    Binding(
+      get: { self.selection.contains(url) },
+      set: { if $0 { self.selection.insert(url) } else { self.selection.remove(url) } }
+    )
+  }
 }
 
 func format(_ bytes: Int64) -> String {
@@ -79,19 +89,51 @@ enum Brand {
     startPoint: .topLeading, endPoint: .bottomTrailing)
 }
 
-extension ReclaimCore.Category {
+extension FileGroup {
   var color: Color {
     switch self {
-    case .xcode: .blue
-    case .unity: .indigo
-    case .nodeModules: .green
-    case .pods: .red
-    case .developer: .orange
     case .caches: .teal
     case .logs: .gray
     case .trash: .pink
     case .mail: .cyan
+    case .developer: .orange
+    case .xcode: .blue
+    case .unity: .indigo
+    case .nodeModules: .green
+    case .pods: .red
     }
+  }
+}
+
+extension Safety {
+  var color: Color {
+    switch self {
+    case .safe: .green
+    case .takesTime: Color(red: 0.86, green: 0.58, blue: 0.0)
+    case .checkFirst: Color(red: 0.93, green: 0.33, blue: 0.20)
+    }
+  }
+
+  var symbol: String {
+    switch self {
+    case .safe: "checkmark.circle.fill"
+    case .takesTime: "clock.fill"
+    case .checkFirst: "exclamationmark.triangle.fill"
+    }
+  }
+}
+
+struct SafetyTag: View {
+  let safety: Safety
+
+  var body: some View {
+    Label(safety.title, systemImage: safety.symbol)
+      .font(.caption.weight(.semibold))
+      .foregroundStyle(safety.color)
+      .padding(.horizontal, 8).padding(.vertical, 3)
+      .background(safety.color.opacity(0.13), in: Capsule())
+      .fixedSize()
+      .help(safety.explanation)
   }
 }
 
@@ -102,10 +144,24 @@ struct IconTile: View {
 
   var body: some View {
     Image(systemName: symbol)
-      .font(.system(size: size * 0.48, weight: .semibold))
+      .font(.system(size: size * 0.46, weight: .semibold))
       .foregroundStyle(.white)
       .frame(width: size, height: size)
       .background(color.gradient, in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+  }
+}
+
+/// The owning app's icon when we know the app, otherwise the group's tile.
+struct ItemIcon: View {
+  let target: Target
+  let group: FileGroup
+
+  var body: some View {
+    if let id = target.appID, let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+      Image(nsImage: NSWorkspace.shared.icon(forFile: app.path)).resizable().frame(width: 30, height: 30)
+    } else {
+      IconTile(symbol: group.symbol, color: group.color, size: 26).frame(width: 30, height: 30)
+    }
   }
 }
 
@@ -116,15 +172,16 @@ struct PrimaryButton: ButtonStyle {
     configuration.label
       .font(.headline)
       .foregroundStyle(.white)
-      .padding(.horizontal, 22).padding(.vertical, 11)
+      .padding(.horizontal, 22).padding(.vertical, 10)
       .background(Brand.gradient, in: Capsule())
       .shadow(color: Brand.teal.opacity(isEnabled ? 0.35 : 0), radius: 10, y: 4)
       .opacity(!isEnabled ? 0.45 : configuration.isPressed ? 0.85 : 1)
       .scaleEffect(configuration.isPressed ? 0.98 : 1)
+      .fixedSize()
   }
 }
 
-/// Round checkmark used for all selections; shows a dash when partly selected.
+/// Round checkmark; shows a dash when a group is partly selected.
 struct CheckCircle: ToggleStyle {
   func makeBody(configuration: Configuration) -> some View {
     Button { configuration.isOn.toggle() } label: {
@@ -142,6 +199,22 @@ struct CheckCircle: ToggleStyle {
   }
 }
 
+/// Rounded card of rows separated by hairlines.
+struct Card<Item, Row: View>: View {
+  let items: [Item]
+  @ViewBuilder let row: (Item) -> Row
+
+  var body: some View {
+    VStack(spacing: 0) {
+      ForEach(items.indices, id: \.self) { index in
+        if index > 0 { Divider().padding(.leading, 56) }
+        row(items[index]).padding(.horizontal, 14).padding(.vertical, 10)
+      }
+    }
+    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+  }
+}
+
 // MARK: - Screens
 
 struct ContentView: View {
@@ -152,6 +225,7 @@ struct ContentView: View {
       switch model.phase {
       case .idle: HomeView(model: model)
       case .scanning, .cleaning: WorkingView(model: model)
+      case .results where model.findings.isEmpty: TidyView(model: model)
       case .results: ResultsView(model: model)
       case .done: DoneView(model: model)
       }
@@ -169,27 +243,21 @@ struct HomeView: View {
   let model: Model
 
   var body: some View {
-    VStack(spacing: 26) {
-      if !model.hasFullDiskAccess { AccessBanner().frame(maxWidth: 560) }
+    VStack(spacing: 24) {
+      if !model.hasFullDiskAccess { AccessBanner().frame(maxWidth: 520) }
       Spacer()
       Image(nsImage: NSApp.applicationIconImage)
-        .resizable().frame(width: 128, height: 128)
+        .resizable().frame(width: 120, height: 120)
         .shadow(color: Brand.teal.opacity(0.4), radius: 30, y: 10)
       VStack(spacing: 8) {
-        Text("Let's free up some space").font(.system(size: 34, weight: .bold, design: .rounded))
-        Text("Reclaim finds caches, logs and leftovers from your projects.\nYou see everything first and decide what goes.")
+        Text("Let's free up some space").font(.system(size: 32, weight: .bold, design: .rounded))
+        Text("Reclaim finds files your Mac doesn't need.\nYou see everything first and decide what goes.")
           .multilineTextAlignment(.center).foregroundStyle(.secondary)
       }
-      DiskCard().frame(maxWidth: 420)
+      DiskCard().frame(maxWidth: 400)
       Button("Start Scan", action: model.scan)
         .buttonStyle(PrimaryButton())
         .keyboardShortcut(.defaultAction)
-      HStack(spacing: 18) {
-        Label("Safe by default", systemImage: "checkmark.shield")
-        Label("You choose", systemImage: "hand.tap")
-        Label("Nothing hidden", systemImage: "eye")
-      }
-      .font(.callout).foregroundStyle(.secondary)
       Spacer()
     }
     .padding(32)
@@ -197,33 +265,19 @@ struct HomeView: View {
 }
 
 struct DiskCard: View {
-  var reclaimable: Int64 = 0
   private let volume = try? URL(fileURLWithPath: NSHomeDirectory())
     .resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey])
 
   var body: some View {
     let total = Double(max(1, volume?.volumeTotalCapacity ?? 1))
     let free = Double(volume?.volumeAvailableCapacityForImportantUsage ?? 0)
-    let used = max(0, total - free)
-    let freed = min(Double(reclaimable), used)
     VStack(alignment: .leading, spacing: 8) {
-      Label("Macintosh HD", systemImage: "internaldrive").font(.callout.weight(.semibold))
-      GeometryReader { geo in
-        ZStack(alignment: .leading) {
-          Capsule().fill(.quaternary)
-          Capsule().fill(Color.secondary.opacity(0.45)).frame(width: geo.size.width * used / total)
-          if reclaimable > 0 {
-            Capsule().fill(Brand.gradient)
-              .frame(width: max(6, geo.size.width * freed / total))
-              .offset(x: geo.size.width * (used - freed) / total)
-          }
-        }
+      HStack {
+        Label("Macintosh HD", systemImage: "internaldrive").font(.callout.weight(.semibold))
+        Spacer()
+        Text("\(format(Int64(free))) free").font(.callout).foregroundStyle(.secondary)
       }
-      .frame(height: 8)
-      Text(reclaimable > 0 ? "\(format(Int64(free))) free · +\(format(reclaimable)) after cleaning"
-                           : "\(format(Int64(free))) free of \(format(Int64(total)))")
-        .font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
-        .contentTransition(.numericText())
+      ProgressView(value: min(1, max(0, (total - free) / total))).tint(Brand.teal)
     }
     .padding(14)
     .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -235,8 +289,8 @@ struct AccessBanner: View {
     HStack(spacing: 12) {
       IconTile(symbol: "lock.open.fill", color: .orange, size: 28)
       VStack(alignment: .leading, spacing: 2) {
-        Text("See everything with Full Disk Access").font(.callout.weight(.semibold))
-        Text("Adds Trash, Mail, app containers and projects in Desktop, Documents and Downloads.")
+        Text("Allow Full Disk Access to find more").font(.callout.weight(.semibold))
+        Text("Lets Reclaim check your Trash, email attachments and projects in Documents.")
           .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
       }
       Spacer()
@@ -265,11 +319,21 @@ struct WorkingView: View {
       }
       .frame(width: 120, height: 120)
       .onAppear { spin = true }
-      Text(model.phase == .cleaning ? "Cleaning up…" : "Looking around your Mac…")
-        .font(.title2.weight(.semibold))
-      Text(model.phase == .cleaning ? "Removing the items you picked." : "Checking caches, logs, Xcode, Unity and project folders.")
-        .foregroundStyle(.secondary)
+      Text(model.phase == .cleaning ? "Cleaning up…" : "Looking around your Mac…").font(.title2.weight(.semibold))
       if model.phase == .scanning { Button("Cancel", action: model.cancelScan).controlSize(.large) }
+    }
+  }
+}
+
+struct TidyView: View {
+  let model: Model
+
+  var body: some View {
+    VStack(spacing: 14) {
+      Image(systemName: "sparkles").font(.system(size: 56)).foregroundStyle(Brand.gradient)
+      Text("Your Mac is already tidy").font(.title.bold())
+      Text("Nothing worth cleaning right now.").foregroundStyle(.secondary)
+      Button("Scan Again", action: model.scan).buttonStyle(PrimaryButton())
     }
   }
 }
@@ -308,44 +372,40 @@ struct ResultsView: View {
   @State private var confirming = false
 
   var body: some View {
-    if model.findings.isEmpty {
-      VStack(spacing: 14) {
-        Image(systemName: "sparkles").font(.system(size: 56)).foregroundStyle(Brand.gradient)
-        Text("Your Mac is already tidy").font(.title.bold())
-        Text("Nothing worth cleaning right now.").foregroundStyle(.secondary)
-        Button("Scan Again", action: model.scan).buttonStyle(PrimaryButton())
+    ScrollView {
+      Group {
+        if let group = model.openGroup { GroupDetail(model: model, group: group) } else { overview }
       }
-    } else {
-      HStack(spacing: 0) {
-        sidebar
-        Divider()
-        VStack(spacing: 0) {
-          if let category = model.category { CategoryDetail(model: model, category: category) }
-          actionBar
-        }
-      }
+      .padding(.horizontal, 28).padding(.top, 36).padding(.bottom, 20)
+      .frame(maxWidth: 760)
+      .frame(maxWidth: .infinity)
     }
+    .id(model.openGroup)
+    .safeAreaInset(edge: .bottom) { actionBar }
   }
 
-  private var sidebar: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      VStack(alignment: .leading, spacing: 2) {
-        Text("Found").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
-        Text(format(model.foundBytes)).font(.system(size: 30, weight: .bold, design: .rounded)).monospacedDigit()
+  private var overview: some View {
+    VStack(alignment: .leading, spacing: 18) {
+      HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("\(format(model.foundBytes)) found").font(.system(size: 32, weight: .bold, design: .rounded))
+          Text("Only safe items are selected. Open a group to see what's inside.").foregroundStyle(.secondary)
+        }
+        Spacer()
+        Button("Scan Again", action: model.scan)
       }
-      .padding(.top, 34)
-      .padding(.horizontal, 8)
-      if !model.hasFullDiskAccess { AccessBanner().controlSize(.small) }
-      ScrollView {
-        VStack(spacing: 4) {
-          ForEach(model.categories, id: \.self) { CategoryButton(model: model, category: $0) }
+      if !model.hasFullDiskAccess { AccessBanner() }
+      Card(items: model.groups) { GroupRow(model: model, group: $0) }
+      VStack(alignment: .leading, spacing: 6) {
+        ForEach(Safety.allCases, id: \.self) { safety in
+          HStack(spacing: 8) {
+            SafetyTag(safety: safety).frame(width: 110, alignment: .leading)
+            Text(safety.explanation).font(.caption).foregroundStyle(.secondary)
+          }
         }
       }
-      DiskCard(reclaimable: model.selectedBytes).padding(.bottom, 14)
+      .padding(.leading, 4)
     }
-    .padding(.horizontal, 12)
-    .frame(width: 290)
-    .background(.quaternary.opacity(0.35))
   }
 
   private var actionBar: some View {
@@ -353,15 +413,14 @@ struct ResultsView: View {
       VStack(alignment: .leading, spacing: 2) {
         Text("\(format(model.selectedBytes)) selected").font(.title3.bold()).monospacedDigit()
           .contentTransition(.numericText())
-        Text("\(model.selection.count) of \(model.findings.reduce(0) { $0 + $1.targets.count }) items")
+        Text("\(model.selection.count) item\(model.selection.count == 1 ? "" : "s")")
           .font(.caption).foregroundStyle(.secondary)
       }
       Spacer()
-      Button("Scan Again", action: model.scan).controlSize(.large).fixedSize()
       Button {
         confirming = true
       } label: {
-        Label("Clean", systemImage: "sparkles").fixedSize()
+        Label("Clean", systemImage: "sparkles")
       }
       .buttonStyle(PrimaryButton())
       .disabled(model.selection.isEmpty)
@@ -369,146 +428,139 @@ struct ResultsView: View {
       .confirmationDialog("Clean \(format(model.selectedBytes))?", isPresented: $confirming) {
         Button("Clean", role: .destructive, action: model.clean)
       } message: {
-        Text("Items are deleted permanently, except Xcode Archives, Unity builds and Mail attachments, which go to the Trash.")
+        Text(confirmMessage)
       }
     }
-    .padding(16)
+    .padding(.horizontal, 28).padding(.vertical, 14)
     .background(.bar)
     .animation(.smooth, value: model.selectedBytes)
   }
+
+  private var confirmMessage: String {
+    let toTrash = model.selected.filter(\.movesToTrash).reduce(Int64(0)) { $0 + $1.bytes }
+    var message = toTrash > 0
+      ? "\(format(toTrash)) goes to the Trash. Everything else is removed for good."
+      : "Removed items can't be restored."
+    if model.selected.contains(where: { $0.safety == .checkFirst }) {
+      message += " Your selection includes items marked Check first."
+    }
+    return message
+  }
 }
 
-struct CategoryButton: View {
+struct GroupRow: View {
   let model: Model
-  let category: ReclaimCore.Category
+  let group: FileGroup
 
   var body: some View {
-    let urls = model.urls(in: category)
-    let picked = urls.filter(model.selection.contains).count
-    Button {
-      model.category = category
-    } label: {
-      HStack(spacing: 10) {
-        IconTile(symbol: category.symbol, color: category.color)
-        VStack(alignment: .leading, spacing: 1) {
-          Text(category.title).fontWeight(.medium)
-          Text(picked == 0 ? "\(urls.count) item\(urls.count == 1 ? "" : "s")" : "\(picked) of \(urls.count) selected")
-            .font(.caption).foregroundStyle(picked == 0 ? Color.secondary : Brand.teal)
+    let findings = model.findings(in: group)
+    HStack(spacing: 12) {
+      Toggle(sources: model.urls(in: group).map(model.binding), isOn: \.self) {
+        IconTile(symbol: group.symbol, color: group.color)
+      }
+      .toggleStyle(CheckCircle())
+      .accessibilityLabel(group.title)
+      Button {
+        withAnimation(.smooth) { model.openGroup = group }
+      } label: {
+        HStack(spacing: 10) {
+          VStack(alignment: .leading, spacing: 2) {
+            Text(group.title).font(.headline)
+            Text(group.summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+          }
+          Spacer(minLength: 8)
+          ForEach(Set(findings.map(\.safety)).sorted(), id: \.self) { SafetyTag(safety: $0) }
+          Text(format(findings.reduce(0) { $0 + $1.bytes })).monospacedDigit().frame(minWidth: 64, alignment: .trailing)
+          Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+    }
+  }
+}
+
+struct GroupDetail: View {
+  @Bindable var model: Model
+  let group: FileGroup
+
+  var body: some View {
+    let urls = model.urls(in: group)
+    let allSelected = urls.allSatisfy(model.selection.contains)
+    VStack(alignment: .leading, spacing: 18) {
+      Button {
+        withAnimation(.smooth) { model.openGroup = nil }
+      } label: {
+        Label("All groups", systemImage: "chevron.left").font(.callout.weight(.medium))
+      }
+      .buttonStyle(.plain)
+      .foregroundStyle(Brand.teal)
+      .keyboardShortcut(.cancelAction)
+
+      HStack(alignment: .top, spacing: 14) {
+        IconTile(symbol: group.symbol, color: group.color, size: 48)
+        VStack(alignment: .leading, spacing: 4) {
+          Text(group.title).font(.system(size: 26, weight: .bold, design: .rounded))
+          Text(group.summary).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         Spacer()
-        Text(format(model.bytes(in: category))).font(.callout).monospacedDigit().foregroundStyle(.secondary)
+        Button(allSelected ? "Select None" : "Select All") {
+          if allSelected { model.selection.subtract(urls) } else { model.selection.formUnion(urls) }
+        }
       }
-      .padding(8)
-      .background(model.category == category ? Brand.teal.opacity(0.16) : .clear,
-                  in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-  }
-}
 
-struct CategoryDetail: View {
-  @Bindable var model: Model
-  let category: ReclaimCore.Category
-
-  var body: some View {
-    let urls = model.urls(in: category)
-    let allSelected = urls.allSatisfy(model.selection.contains)
-    ScrollView {
-      VStack(alignment: .leading, spacing: 14) {
-        HStack(alignment: .top, spacing: 14) {
-          IconTile(symbol: category.symbol, color: category.color, size: 52)
-          VStack(alignment: .leading, spacing: 4) {
-            Text(category.title).font(.system(size: 26, weight: .bold, design: .rounded))
-            Text(category.summary).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-          }
-          Spacer()
-          Button(allSelected ? "Select None" : "Select All") {
-            if allSelected { model.selection.subtract(urls) } else { model.selection.formUnion(urls) }
+      ForEach(model.findings(in: group)) { finding in
+        if finding.targets.count == 1 {
+          Card(items: finding.targets) { ItemRow(model: model, target: $0, group: group, finding: finding, showTag: true) }
+        } else {
+          VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+              Text(finding.title).font(.headline)
+              SafetyTag(safety: finding.safety)
+              if finding.movesToTrash { Text("Moves to Trash").font(.caption).foregroundStyle(.secondary) }
+              Spacer()
+              Text(format(finding.bytes)).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+            }
+            Card(items: finding.targets) { ItemRow(model: model, target: $0, group: group, finding: finding, showTag: false) }
           }
         }
-        .padding(.bottom, 6)
-        ForEach(model.items(in: category)) { FindingCard(finding: $0, selection: $model.selection) }
       }
-      .padding(24)
-      .padding(.top, 14)
     }
-    .id(category)
   }
 }
 
-struct FindingCard: View {
+struct ItemRow: View {
+  let model: Model
+  let target: Target
+  let group: FileGroup
   let finding: Finding
-  @Binding var selection: Set<URL>
-  @State private var expanded = false
+  let showTag: Bool
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Toggle(sources: finding.targets.map(binding), isOn: \.self) {
-        line(title: finding.title, url: finding.targets.count == 1 ? finding.targets[0].url : finding.location,
-             bytes: finding.bytes, trash: finding.movesToTrash, prominent: true)
-      }
-      if finding.targets.count > 1 {
-        Button {
-          withAnimation(.snappy) { expanded.toggle() }
-        } label: {
-          HStack(spacing: 4) {
-            Text(expanded ? "Hide items" : "Choose from \(finding.targets.count) items")
-            Image(systemName: "chevron.down").rotationEffect(.degrees(expanded ? 180 : 0))
-          }
-          .font(.caption.weight(.medium)).foregroundStyle(Brand.teal)
-        }
-        .buttonStyle(.plain)
-        .padding(.leading, 38)
-        if expanded {
-          VStack(spacing: 8) {
-            ForEach(finding.targets.sorted { $0.bytes > $1.bytes }, id: \.url) { target in
-              Toggle(isOn: binding(target)) {
-                line(title: target.url.lastPathComponent, url: target.url, bytes: target.bytes, trash: false, prominent: false)
-              }
+    HStack(spacing: 10) {
+      Toggle(isOn: model.binding(target.url)) {
+        HStack(spacing: 10) {
+          ItemIcon(target: target, group: group)
+          VStack(alignment: .leading, spacing: 1) {
+            Text(target.name).lineLimit(1)
+            if showTag && finding.movesToTrash {
+              Text("Moves to Trash").font(.caption).foregroundStyle(.secondary)
             }
           }
-          .padding(.leading, 38)
         }
       }
-    }
-    .toggleStyle(CheckCircle())
-    .padding(14)
-    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-  }
-
-  private func binding(_ target: Target) -> Binding<Bool> {
-    Binding(
-      get: { selection.contains(target.url) },
-      set: { if $0 { selection.insert(target.url) } else { selection.remove(target.url) } }
-    )
-  }
-
-  private func line(title: String, url: URL, bytes: Int64, trash: Bool, prominent: Bool) -> some View {
-    HStack {
-      VStack(alignment: .leading, spacing: 3) {
-        HStack(spacing: 6) {
-          Text(title).font(prominent ? .headline : .callout).lineLimit(1)
-          if trash {
-            Label("Moves to Trash", systemImage: "arrow.uturn.backward")
-              .font(.caption2.weight(.medium)).foregroundStyle(.orange)
-              .padding(.horizontal, 6).padding(.vertical, 2)
-              .background(.orange.opacity(0.12), in: Capsule())
-          }
-        }
-        Text((url.path as NSString).abbreviatingWithTildeInPath)
-          .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-      }
-      Spacer()
-      Text(format(bytes)).font(prominent ? .headline : .callout).monospacedDigit()
-        .foregroundStyle(prominent ? .primary : .secondary)
+      .toggleStyle(CheckCircle())
+      Spacer(minLength: 8)
+      if showTag { SafetyTag(safety: finding.safety) }
+      Text(format(target.bytes)).monospacedDigit().foregroundStyle(.secondary).frame(minWidth: 64, alignment: .trailing)
       Button {
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+        NSWorkspace.shared.activateFileViewerSelecting([target.url])
       } label: {
         Image(systemName: "folder")
       }
       .buttonStyle(.borderless)
       .help("Show in Finder")
     }
+    .help((target.url.path as NSString).abbreviatingWithTildeInPath)
   }
 }

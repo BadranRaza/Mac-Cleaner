@@ -1,76 +1,105 @@
 import AppKit
 
 public enum Category: String, CaseIterable, Sendable {
-  // Declaration order is the section order in the app.
-  case xcode, unity, nodeModules, pods, developer, caches, logs, trash, mail
+  // Declaration order is the order in the app.
+  case caches, logs, trash, mail, developer, xcode, unity, nodeModules, pods
 
   public var title: String {
     switch self {
-    case .caches: "App Caches"
-    case .logs: "Logs"
+    case .caches: "Temporary App Files"
+    case .logs: "Activity Logs"
     case .trash: "Trash"
+    case .mail: "Email Attachments"
+    case .developer: "Developer Downloads"
     case .xcode: "Xcode"
-    case .developer: "Developer Caches"
-    case .unity: "Unity"
-    case .nodeModules: "node_modules"
-    case .pods: "CocoaPods Pods"
-    case .mail: "Mail Attachments"
+    case .unity: "Unity Projects"
+    case .nodeModules: "JavaScript Packages"
+    case .pods: "iOS Libraries"
     }
   }
 
-  /// One friendly sentence on what this is and whether it is safe to remove.
+  /// One plain sentence: what it is and what happens if you remove it.
   public var summary: String {
     switch self {
-    case .xcode: "Build caches, simulator data and archives. Xcode recreates caches; archives are your past releases."
-    case .unity: "Unity rebuilds Library, Temp and Obj when you reopen a project. Builds are moved to the Trash."
-    case .nodeModules: "Installed JavaScript packages. Run npm install again when you work on the project."
-    case .pods: "Installed CocoaPods. Run pod install again when you work on the project."
-    case .developer: "Download caches of package managers. They re-download what they need."
-    case .caches: "Temporary files apps keep to load faster. Apps rebuild them automatically."
-    case .logs: "Diagnostic logs apps write over time. Safe to remove."
-    case .trash: "Files already in your Trash. Removing them is permanent."
-    case .mail: "Attachments Mail downloaded. They download again when you open the email."
+    case .caches: "Files apps keep so they open faster. Apps quietly make new ones when needed."
+    case .logs: "Records apps write about what they did. Nothing needs them."
+    case .trash: "Things you already deleted. Emptying the Trash can't be undone."
+    case .mail: "Attachments Mail saved. They download again when you open the email."
+    case .developer: "Downloads kept by developer tools. They download again when needed."
+    case .xcode: "Files Xcode makes while building apps. Rebuilding them takes a while."
+    case .unity: "Files Unity rebuilds when you reopen a project, and your exported builds."
+    case .nodeModules: "Packages downloaded for JavaScript projects. Reinstall with npm install."
+    case .pods: "Libraries downloaded for iOS projects. Reinstall with pod install."
     }
   }
 
   public var symbol: String {
     switch self {
-    case .caches: "internaldrive"
-    case .logs: "doc.text"
+    case .caches: "app.badge"
+    case .logs: "list.bullet.rectangle"
     case .trash: "trash"
+    case .mail: "paperclip"
+    case .developer: "arrow.down.circle"
     case .xcode: "hammer"
-    case .developer: "shippingbox"
     case .unity: "cube"
-    case .nodeModules: "shippingbox.circle"
+    case .nodeModules: "curlybraces"
     case .pods: "square.stack.3d.up"
-    case .mail: "envelope"
+    }
+  }
+}
+
+/// What removing something costs you. Only `.safe` items are selected by default.
+public enum Safety: Int, Comparable, CaseIterable, Sendable {
+  case safe, takesTime, checkFirst
+
+  public static func < (a: Safety, b: Safety) -> Bool { a.rawValue < b.rawValue }
+
+  public var title: String {
+    switch self {
+    case .safe: "Safe"
+    case .takesTime: "Takes time"
+    case .checkFirst: "Check first"
+    }
+  }
+
+  public var explanation: String {
+    switch self {
+    case .safe: "Comes back by itself. You won't notice it's gone."
+    case .takesTime: "Comes back, but rebuilding or downloading it takes a while."
+    case .checkFirst: "May be your only copy. Look before you remove it."
     }
   }
 }
 
 public struct Target: Hashable, Sendable {
+  /// Identifies the item in the app and is what "Show in Finder" reveals.
   public let url: URL
+  /// Friendly name, e.g. the app that owns a cache.
+  public let name: String
+  /// Bundle ID of the owning app, for its icon.
+  public let appID: String?
   public let bytes: Int64
+  /// What cleaning removes. Usually just `url`; for grouped items, the contents of `url`.
+  let paths: [URL]
 }
 
 public struct Finding: Identifiable, Hashable, Sendable {
   public let title: String
   public let category: Category
-  /// The folder shown to the user. Never removed itself; only `targets` are.
   public let location: URL
   public let targets: [Target]
-  /// Rebuildable data that is selected by default.
-  public let preselected: Bool
+  public let safety: Safety
   /// Moved to the Trash instead of deleted, for things that are hard to get back.
   public let movesToTrash: Bool
 
   public var id: String { "\(title)|\(location.path)" }
   public var bytes: Int64 { targets.reduce(0) { $0 + $1.bytes } }
+  public var preselected: Bool { safety == .safe }
 
   /// The same finding limited to the chosen targets.
   public func only(_ urls: Set<URL>) -> Finding {
     Finding(title: title, category: category, location: location, targets: targets.filter { urls.contains($0.url) },
-            preselected: preselected, movesToTrash: movesToTrash)
+            safety: safety, movesToTrash: movesToTrash)
   }
 }
 
@@ -86,19 +115,28 @@ private struct Rule {
   let title: String
   let category: Category
   let path: String
-  var preselected = true
+  var safety = Safety.safe
+  /// List each item inside (apps, projects, iOS versions) instead of one row for the whole folder.
+  var perItem = false
   var movesToTrash = false
   var needsFullDiskAccess = false
   /// Skip the rule while this app runs; it may be writing there.
   var app: String? = nil
 }
 
+private struct PendingTarget: Sendable {
+  let url: URL
+  let name: String
+  let appID: String?
+  let paths: [URL]
+}
+
 private struct Pending: Sendable {
   let title: String
   let category: Category
   let location: URL
-  let targets: [URL]
-  let preselected: Bool
+  let targets: [PendingTarget]
+  let safety: Safety
   let movesToTrash: Bool
 }
 
@@ -122,28 +160,28 @@ public struct Cleaner: Sendable {
   /// Fixed, well-known locations. A rule nested inside another rule's folder
   /// (e.g. Library/Caches/Homebrew) owns those files; the outer rule skips them.
   private static let rules: [Rule] = [
-    Rule(title: "Xcode DerivedData", category: .xcode, path: "Library/Developer/Xcode/DerivedData",
-         preselected: false, app: "com.apple.dt.Xcode"),
-    Rule(title: "Simulator Caches", category: .xcode, path: "Library/Developer/CoreSimulator/Caches",
+    Rule(title: "Build files", category: .xcode, path: "Library/Developer/Xcode/DerivedData",
+         safety: .takesTime, perItem: true, app: "com.apple.dt.Xcode"),
+    Rule(title: "Simulator files", category: .xcode, path: "Library/Developer/CoreSimulator/Caches",
          app: "com.apple.iphonesimulator"),
-    Rule(title: "iOS Device Support", category: .xcode, path: "Library/Developer/Xcode/iOS DeviceSupport",
-         preselected: false),
-    Rule(title: "Xcode Archives", category: .xcode, path: "Library/Developer/Xcode/Archives",
-         preselected: false, movesToTrash: true),
+    Rule(title: "iPhone debugging files", category: .xcode, path: "Library/Developer/Xcode/iOS DeviceSupport",
+         safety: .takesTime, perItem: true),
+    Rule(title: "Archived app builds", category: .xcode, path: "Library/Developer/Xcode/Archives",
+         safety: .checkFirst, perItem: true, movesToTrash: true),
     Rule(title: "Homebrew", category: .developer, path: "Library/Caches/Homebrew"),
     Rule(title: "CocoaPods", category: .developer, path: "Library/Caches/CocoaPods"),
-    Rule(title: "pip", category: .developer, path: "Library/Caches/pip"),
+    Rule(title: "Python (pip)", category: .developer, path: "Library/Caches/pip"),
     Rule(title: "Yarn", category: .developer, path: "Library/Caches/Yarn"),
-    Rule(title: "Go build", category: .developer, path: "Library/Caches/go-build"),
+    Rule(title: "Go", category: .developer, path: "Library/Caches/go-build"),
     Rule(title: "npm", category: .developer, path: ".npm/_cacache"),
-    Rule(title: "Cargo registry", category: .developer, path: ".cargo/registry/cache"),
-    Rule(title: "Gradle", category: .developer, path: ".gradle/caches", preselected: false),
-    Rule(title: "User caches", category: .caches, path: "Library/Caches"),
-    Rule(title: "User logs", category: .logs, path: "Library/Logs"),
-    Rule(title: "Trash", category: .trash, path: ".Trash", preselected: false, needsFullDiskAccess: true),
-    Rule(title: "Mail Downloads", category: .mail,
+    Rule(title: "Rust (Cargo)", category: .developer, path: ".cargo/registry/cache"),
+    Rule(title: "Gradle", category: .developer, path: ".gradle/caches", safety: .takesTime),
+    Rule(title: "Your apps", category: .caches, path: "Library/Caches", perItem: true),
+    Rule(title: "Activity logs", category: .logs, path: "Library/Logs"),
+    Rule(title: "Items in Trash", category: .trash, path: ".Trash", safety: .checkFirst, needsFullDiskAccess: true),
+    Rule(title: "Email attachments", category: .mail,
          path: "Library/Containers/com.apple.mail/Data/Library/Mail Downloads",
-         preselected: false, movesToTrash: true, needsFullDiskAccess: true),
+         safety: .checkFirst, movesToTrash: true, needsFullDiskAccess: true),
   ]
 
   /// Cache folders that hold state or are very expensive to rebuild (prefix match).
@@ -168,20 +206,32 @@ public struct Cleaner: Sendable {
 
     for rule in Self.rules where !runningApps.contains(rule.app ?? "") && (fullDiskAccess || !rule.needsFullDiskAccess) {
       let location = home.appendingPathComponent(rule.path)
-      let targets = children(of: location).filter { !claimed.contains($0.path) && isCleanable($0) }
-      if !targets.isEmpty {
-        pending.append(Pending(title: rule.title, category: rule.category, location: location, targets: targets,
-                               preselected: rule.preselected, movesToTrash: rule.movesToTrash))
-      }
+      let items = children(of: location).filter { !claimed.contains($0.path) && isCleanable($0) }
+      guard !items.isEmpty else { continue }
+      let targets = rule.perItem
+        ? items.map { item in
+            let appID = owner(of: item.lastPathComponent)
+            return PendingTarget(url: item, name: friendlyName(item.lastPathComponent, appID: appID), appID: appID, paths: [item])
+          }
+        : [PendingTarget(url: location, name: rule.title, appID: nil, paths: items)]
+      pending.append(Pending(title: rule.title, category: rule.category, location: location, targets: targets,
+                             safety: rule.safety, movesToTrash: rule.movesToTrash))
     }
 
+    // Apps from the App Store keep their caches inside their own container; one row per app.
     let containers = home.appendingPathComponent("Library/Containers")
-    let containerCaches = !fullDiskAccess ? [] : children(of: containers)
+    let containerTargets: [PendingTarget] = !fullDiskAccess ? [] : children(of: containers)
       .filter { $0.lastPathComponent != "com.apple.mail" && isCleanable($0) }
-      .flatMap { children(of: $0.appendingPathComponent("Data/Library/Caches")).filter(isCleanable) }
-    if !containerCaches.isEmpty {
-      pending.append(Pending(title: "Sandboxed app caches", category: .caches, location: containers,
-                             targets: containerCaches, preselected: true, movesToTrash: false))
+      .compactMap { container in
+        let caches = container.appendingPathComponent("Data/Library/Caches")
+        let items = children(of: caches).filter(isCleanable)
+        guard !items.isEmpty else { return nil }
+        let appID = container.lastPathComponent
+        return PendingTarget(url: caches, name: friendlyName(appID, appID: appID), appID: appID, paths: items)
+      }
+    if !containerTargets.isEmpty {
+      pending.append(Pending(title: "App Store apps", category: .caches, location: containers,
+                             targets: containerTargets, safety: .safe, movesToTrash: false))
     }
 
     pending += findProjectArtifacts()
@@ -191,13 +241,16 @@ public struct Cleaner: Sendable {
       for item in pending {
         group.addTask {
           var targets: [Target] = []
-          for url in item.targets {
+          for target in item.targets {
             if Task.isCancelled { return nil }
-            targets.append(Target(url: url, bytes: allocatedSize(of: url)))
+            let bytes = target.paths.reduce(Int64(0)) { $0 + allocatedSize(of: $1) }
+            if bytes > 0 {
+              targets.append(Target(url: target.url, name: target.name, appID: target.appID, bytes: bytes, paths: target.paths))
+            }
           }
-          let finding = Finding(title: item.title, category: item.category, location: item.location,
-                                targets: targets, preselected: item.preselected, movesToTrash: item.movesToTrash)
-          return finding.bytes > 0 ? finding : nil
+          guard !targets.isEmpty else { return nil }
+          return Finding(title: item.title, category: item.category, location: item.location,
+                         targets: targets.sorted { $0.bytes > $1.bytes }, safety: item.safety, movesToTrash: item.movesToTrash)
         }
       }
       var findings: [Finding] = []
@@ -213,6 +266,10 @@ public struct Cleaner: Sendable {
       && !runningApps.contains(name) && !runningApps.contains(Self.cacheOwners[name] ?? "")
   }
 
+  private func owner(of folderName: String) -> String? {
+    Self.cacheOwners[folderName] ?? (folderName.contains(".") ? folderName : nil)
+  }
+
   /// One walk over the home folder for per-project dependency and build folders.
   private func findProjectArtifacts() -> [Pending] {
     let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey]
@@ -221,10 +278,11 @@ public struct Cleaner: Sendable {
     ) else { return [] }
 
     var found: [Pending] = []
-    func add(_ title: String, _ category: Category, _ location: URL, _ targets: [URL], trash: Bool = false) {
-      guard !targets.isEmpty else { return }
+    func add(_ title: String, _ category: Category, _ location: URL, _ urls: [URL], _ safety: Safety, trash: Bool = false) {
+      guard !urls.isEmpty else { return }
+      let targets = urls.map { PendingTarget(url: $0, name: urls.count == 1 ? title : $0.lastPathComponent, appID: nil, paths: [$0]) }
       found.append(Pending(title: title, category: category, location: location, targets: targets,
-                           preselected: false, movesToTrash: trash))
+                           safety: safety, movesToTrash: trash))
     }
 
     for case let url as URL in walker {
@@ -241,17 +299,17 @@ public struct Cleaner: Sendable {
 
       let parent = url.deletingLastPathComponent()
       if name == "node_modules", exists(parent.appendingPathComponent("package.json")) {
-        add(parent.lastPathComponent, .nodeModules, url, [url])
+        add(parent.lastPathComponent, .nodeModules, url, [url], .takesTime)
         walker.skipDescendants()
       } else if name == "Pods", exists(parent.appendingPathComponent("Podfile")) {
-        add(parent.lastPathComponent, .pods, url, [url])
+        add(parent.lastPathComponent, .pods, url, [url], .takesTime)
         walker.skipDescendants()
       } else if exists(url.appendingPathComponent("ProjectSettings/ProjectVersion.txt")),
                 exists(url.appendingPathComponent("Assets")) {
         let inProject = { (names: [String]) in names.map { url.appendingPathComponent($0) }.filter(self.exists) }
-        add("\(name) · caches", .unity, url, inProject(["Library", "Temp", "Obj", "Logs"]))
+        add("\(name) · rebuildable files", .unity, url, inProject(["Library", "Temp", "Obj", "Logs"]), .takesTime)
         // Builds may be the only copy of a release, so they go to the Trash.
-        add("\(name) · builds", .unity, url, inProject(["Build", "Builds"]), trash: true)
+        add("\(name) · exported builds", .unity, url, inProject(["Build", "Builds"]), .checkFirst, trash: true)
         walker.skipDescendants()
       }
     }
@@ -271,21 +329,40 @@ public struct Cleaner: Sendable {
     var result = CleanResult()
     for finding in findings {
       for target in finding.targets {
-        do {
-          if finding.movesToTrash {
-            try FileManager.default.trashItem(at: target.url, resultingItemURL: nil)
-            result.trashedBytes += target.bytes
-          } else {
-            try FileManager.default.removeItem(at: target.url)
-            result.freedBytes += target.bytes
+        var failed = false
+        for path in target.paths {
+          do {
+            if finding.movesToTrash {
+              try FileManager.default.trashItem(at: path, resultingItemURL: nil)
+            } else {
+              try FileManager.default.removeItem(at: path)
+            }
+          } catch {
+            failed = true
+            result.failures.append("\(path.path): \(error.localizedDescription)")
           }
-        } catch {
-          result.failures.append("\(target.url.path): \(error.localizedDescription)")
+        }
+        // ponytail: a partly failed item counts as not freed; per-path sizes if totals need to be exact.
+        if !failed {
+          if finding.movesToTrash { result.trashedBytes += target.bytes } else { result.freedBytes += target.bytes }
         }
       }
     }
     return result
   }
+}
+
+/// "com.spotify.client" → "Spotify" (installed app name), "MyApp-bxkqzyr…" → "MyApp", "org.swift.swiftpm" → "swiftpm".
+func friendlyName(_ folderName: String, appID: String?) -> String {
+  if let appID, let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: appID) {
+    return FileManager.default.displayName(atPath: app.path).replacingOccurrences(of: ".app", with: "")
+  }
+  // Xcode DerivedData folders end in a 28-character hash.
+  if let dash = folderName.lastIndex(of: "-"), folderName.distance(from: dash, to: folderName.endIndex) == 29 {
+    return String(folderName[..<dash])
+  }
+  let parts = folderName.split(separator: ".")
+  return parts.count >= 3 ? String(parts.last!) : folderName
 }
 
 /// Allocated bytes on disk, like `du`. Hard-linked files are counted once.
