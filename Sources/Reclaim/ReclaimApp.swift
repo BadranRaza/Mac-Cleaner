@@ -22,7 +22,7 @@ struct ReclaimApp: App {
 
 @MainActor @Observable
 final class Model {
-  enum Phase { case idle, scanning, results, cleaning, done }
+  enum Phase { case idle, scanning, quickReview, results, cleaning, done }
 
   var phase = Phase.idle
   var findings: [Finding] = []
@@ -52,7 +52,19 @@ final class Model {
   func findings(in group: FileGroup) -> [Finding] { findings.filter { $0.category == group } }
   func urls(in group: FileGroup) -> [URL] { findings(in: group).flatMap { $0.targets.map(\.url) } }
 
-  func scan() {
+  /// Scan, then offer to clean only Safe items in one step.
+  func quickClean() { scan(quick: true) }
+
+  func goHome() {
+    phase = .idle
+    openGroup = nil
+  }
+
+  func selectedBytes(in group: FileGroup) -> Int64 {
+    findings(in: group).flatMap(\.targets).filter { selection.contains($0.url) }.reduce(0) { $0 + $1.bytes }
+  }
+
+  func scan(quick: Bool = false) {
     phase = .scanning
     openGroup = nil
     scanTask = Task {
@@ -62,7 +74,7 @@ final class Model {
       insights = await explained
       findings = results
       selection = Set(results.filter(\.preselected).flatMap { $0.targets.map(\.url) })
-      phase = .results
+      phase = quick && !results.isEmpty ? .quickReview : .results
     }
   }
 
@@ -285,6 +297,7 @@ struct ContentView: View {
       switch model.phase {
       case .idle: HomeView(model: model)
       case .scanning, .cleaning: WorkingView(model: model)
+      case .quickReview: QuickReviewView(model: model)
       case .results where model.findings.isEmpty: TidyView(model: model)
       case .results: ResultsView(model: model)
       case .done: DoneView(model: model)
@@ -304,46 +317,174 @@ struct HomeView: View {
   let model: Model
 
   var body: some View {
-    VStack(spacing: 24) {
-      if !model.hasFullDiskAccess { AccessBanner().frame(maxWidth: 520) }
-      Spacer()
-      Image(nsImage: NSApp.applicationIconImage)
-        .resizable().frame(width: 120, height: 120)
-        .shadow(color: Brand.teal.opacity(0.4), radius: 30, y: 10)
-      VStack(spacing: 8) {
-        Text("Let's free up some space").font(.system(size: 32, weight: .bold, design: .rounded))
-        Text("Reclaim finds files your Mac doesn't need.\nYou see everything first and decide what goes.")
-          .multilineTextAlignment(.center).foregroundStyle(.secondary)
+    VStack(spacing: 30) {
+      if !model.hasFullDiskAccess { AccessBanner().frame(maxWidth: 640) }
+      Spacer(minLength: 0)
+      HStack(spacing: 40) {
+        DiskRing()
+        VStack(alignment: .leading, spacing: 10) {
+          HStack(spacing: 8) {
+            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 26, height: 26)
+            Text("Reclaim").font(.headline).foregroundStyle(.secondary)
+          }
+          Text("Let's free up\nsome space").font(.system(size: 38, weight: .bold, design: .rounded))
+            .fixedSize(horizontal: false, vertical: true)
+          Text("Clean in one click, look through everything first,\nor remove apps you no longer use.")
+            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
       }
-      DiskCard().frame(maxWidth: 400)
-      Button("Start Scan", action: model.scan)
-        .buttonStyle(PrimaryButton())
-        .keyboardShortcut(.defaultAction)
-      Button("Uninstall an app…", action: model.openUninstall)
-        .buttonStyle(.plain).foregroundStyle(Brand.teal)
-      Spacer()
+      HStack(spacing: 14) {
+        ActionCard(symbol: "sparkles", title: "Quick Clean",
+                   detail: "Removes only safe files in one go. You'll see the total first.",
+                   highlighted: true, action: model.quickClean)
+          .keyboardShortcut(.defaultAction)
+        ActionCard(symbol: "magnifyingglass", title: "Scan & Review",
+                   detail: "See everything Reclaim finds and choose what goes.",
+                   action: { model.scan() })
+        ActionCard(symbol: "xmark.app", title: "Uninstall Apps",
+                   detail: "Remove apps together with the files they leave behind.",
+                   action: model.openUninstall)
+      }
+      .frame(maxWidth: 760)
+      Spacer(minLength: 0)
+      HStack(spacing: 18) {
+        Label("Safe by default", systemImage: "checkmark.shield")
+        Label("You decide", systemImage: "hand.tap")
+        Label("Nothing hidden", systemImage: "eye")
+      }
+      .font(.caption).foregroundStyle(.tertiary)
     }
     .padding(32)
+    .background(alignment: .top) {
+      // Soft brand glow behind the hero.
+      RadialGradient(colors: [Brand.teal.opacity(0.22), .clear], center: .top, startRadius: 0, endRadius: 520)
+        .ignoresSafeArea()
+    }
   }
 }
 
-struct DiskCard: View {
+/// Ring showing how full the disk is, with free space in the middle.
+struct DiskRing: View {
+  @State private var shown = false
   private let volume = try? URL(fileURLWithPath: NSHomeDirectory())
     .resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey])
 
   var body: some View {
     let total = Double(max(1, volume?.volumeTotalCapacity ?? 1))
     let free = Double(volume?.volumeAvailableCapacityForImportantUsage ?? 0)
-    VStack(alignment: .leading, spacing: 8) {
-      HStack {
-        Label("Macintosh HD", systemImage: "internaldrive").font(.callout.weight(.semibold))
-        Spacer()
-        Text("\(format(Int64(free))) free").font(.callout).foregroundStyle(.secondary)
+    let used = min(1, max(0, (total - free) / total))
+    ZStack {
+      Circle().stroke(.quaternary, lineWidth: 16)
+      Circle()
+        .trim(from: 0, to: shown ? used : 0)
+        .stroke(Brand.gradient, style: StrokeStyle(lineWidth: 16, lineCap: .round))
+        .rotationEffect(.degrees(-90))
+        .shadow(color: Brand.teal.opacity(0.35), radius: 8)
+      VStack(spacing: 2) {
+        Text(format(Int64(free))).font(.system(size: 26, weight: .bold, design: .rounded)).monospacedDigit()
+        Text("free of \(format(Int64(total)))").font(.caption).foregroundStyle(.secondary)
       }
-      ProgressView(value: min(1, max(0, (total - free) / total))).tint(Brand.teal)
     }
-    .padding(14)
-    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    .frame(width: 180, height: 180)
+    .onAppear { withAnimation(.smooth(duration: 1.1)) { shown = true } }
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel("\(format(Int64(free))) free of \(format(Int64(total)))")
+  }
+}
+
+/// A large, friendly choice on the home screen.
+struct ActionCard: View {
+  let symbol: String
+  let title: String
+  let detail: String
+  var highlighted = false
+  let action: () -> Void
+  @State private var hovering = false
+
+  var body: some View {
+    Button(action: action) {
+      VStack(alignment: .leading, spacing: 10) {
+        Image(systemName: symbol)
+          .font(.system(size: 20, weight: .semibold))
+          .foregroundStyle(highlighted ? AnyShapeStyle(.white) : AnyShapeStyle(Brand.gradient))
+          .frame(width: 42, height: 42)
+          .background(highlighted ? AnyShapeStyle(.white.opacity(0.2)) : AnyShapeStyle(Brand.teal.opacity(0.14)),
+                      in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        Spacer(minLength: 6)
+        Text(title).font(.system(size: 17, weight: .semibold, design: .rounded))
+        Text(detail).font(.callout)
+          .foregroundStyle(highlighted ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .foregroundStyle(highlighted ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+      .padding(18)
+      .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
+      .background {
+        RoundedRectangle(cornerRadius: 20, style: .continuous)
+          .fill(highlighted ? AnyShapeStyle(Brand.gradient) : AnyShapeStyle(.quaternary.opacity(0.55)))
+        RoundedRectangle(cornerRadius: 20, style: .continuous)
+          .strokeBorder(.white.opacity(highlighted ? 0.25 : 0.06))
+      }
+      .shadow(color: (highlighted ? Brand.teal : .black).opacity(hovering ? 0.35 : 0.15), radius: hovering ? 18 : 8, y: hovering ? 8 : 3)
+      .scaleEffect(hovering ? 1.02 : 1)
+      .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+    .buttonStyle(.plain)
+    .onHover { hovering = $0 }
+    .animation(.smooth(duration: 0.2), value: hovering)
+  }
+}
+
+/// After a Quick Clean scan: the safe total, what it includes, and one button.
+struct QuickReviewView: View {
+  let model: Model
+
+  var body: some View {
+    let groups = model.groups.filter { model.selectedBytes(in: $0) > 0 }
+    let needsLook = model.foundBytes - model.selectedBytes
+    VStack(spacing: 20) {
+      Image(systemName: "sparkles")
+        .font(.system(size: 34, weight: .semibold))
+        .foregroundStyle(.white)
+        .frame(width: 76, height: 76)
+        .background(Brand.gradient, in: Circle())
+        .shadow(color: Brand.teal.opacity(0.4), radius: 16, y: 6)
+      if groups.isEmpty {
+        Text("Nothing safe to clean right now").font(.system(size: 30, weight: .bold, design: .rounded))
+      } else {
+        VStack(spacing: 6) {
+          Text("\(format(model.selectedBytes)) ready to clean").font(.system(size: 36, weight: .bold, design: .rounded))
+          Text("Only files marked Safe. Apps make new ones by themselves when they need them.")
+            .foregroundStyle(.secondary)
+        }
+        Card(items: groups) { group in
+          HStack(spacing: 12) {
+            IconTile(symbol: group.symbol, color: group.color, size: 30)
+            Text(group.title)
+            Spacer()
+            Text(format(model.selectedBytes(in: group))).monospacedDigit().foregroundStyle(.secondary)
+          }
+        }
+        .frame(maxWidth: 440)
+      }
+      if needsLook > 0 {
+        Text("Another \(format(needsLook)) needs a look before it goes.").font(.callout).foregroundStyle(.secondary)
+      }
+      HStack(spacing: 12) {
+        Button("Review First") { model.phase = .results }.controlSize(.large)
+        if !groups.isEmpty {
+          Button {
+            model.clean()
+          } label: {
+            Label("Clean Now", systemImage: "sparkles")
+          }
+          .buttonStyle(PrimaryButton())
+          .keyboardShortcut(.defaultAction)
+        }
+      }
+      Button("Cancel", action: model.goHome).buttonStyle(.plain).foregroundStyle(.secondary)
+    }
+    .padding(32)
   }
 }
 
@@ -396,7 +537,7 @@ struct TidyView: View {
       Image(systemName: "sparkles").font(.system(size: 56)).foregroundStyle(Brand.gradient)
       Text("Your Mac is already tidy").font(.title.bold())
       Text("Nothing worth cleaning right now.").foregroundStyle(.secondary)
-      Button("Scan Again", action: model.scan).buttonStyle(PrimaryButton())
+      Button("Back to Home", action: model.goHome).buttonStyle(PrimaryButton())
     }
   }
 }
@@ -420,10 +561,13 @@ struct DoneView: View {
           .foregroundStyle(.secondary)
           .help(result.failures.joined(separator: "\n"))
       }
-      Button("Done", action: model.scan)
-        .buttonStyle(PrimaryButton())
-        .keyboardShortcut(.defaultAction)
-        .padding(.top, 8)
+      HStack(spacing: 12) {
+        Button("Scan Again") { model.scan() }.controlSize(.large)
+        Button("Done", action: model.goHome)
+          .buttonStyle(PrimaryButton())
+          .keyboardShortcut(.defaultAction)
+      }
+      .padding(.top, 8)
     }
   }
 }
@@ -456,7 +600,7 @@ struct ResultsView: View {
         }
         Spacer()
         Button("Uninstall Apps", action: model.openUninstall)
-        Button("Scan Again", action: model.scan)
+        Button("Scan Again") { model.scan() }
       }
       if !model.hasFullDiskAccess { AccessBanner() }
       Card(items: model.groups) { GroupRow(model: model, group: $0) }

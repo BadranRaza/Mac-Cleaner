@@ -26,6 +26,8 @@ Every item is tagged, and only **Safe** items are selected by default:
 | Unity Projects | `Library`, `Temp`, `Obj`, `Logs` (take time); `Build`/`Builds` (check first, moved to the Trash) | Mixed |
 | JavaScript Packages, iOS Libraries | Each project's `node_modules` / `Pods` | Takes time |
 
+**Quick Clean** scans and shows how much Safe space it found, grouped, with one Clean Now button. **Scan & Review** shows everything with full control.
+
 **Uninstall Apps** removes an app together with the files it created (settings, caches, containers, login items), found by bundle ID. Folders that only match the app's name are marked Check first. The app is quit first and everything goes to the Trash.
 
 **Also taking space** explains big things Reclaim leaves alone, like Docker virtual machines, AI chat history, browser profiles and other accounts, and how to shrink them yourself.
