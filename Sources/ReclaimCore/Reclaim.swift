@@ -113,6 +113,10 @@ public struct CleanResult: Sendable {
   public var freedBytes: Int64 = 0
   public var trashedBytes: Int64 = 0
   public var failures: [String] = []
+  /// Items that failed only because they belong to the system (e.g. apps installed for all users).
+  public var needsPassword: [URL] = []
+  /// The user cancelled the password prompt.
+  public var passwordDeclined = false
 
   public init() {}
 }
@@ -357,6 +361,7 @@ public struct Cleaner: Sendable {
           } catch {
             failedPaths.append(path)
             result.failures.append("\(path.path): \(error.localizedDescription)")
+            if isPermissionError(error) { result.needsPassword.append(path) }
           }
         }
         // A folder can be partly removed (a file in use); count only what is really gone.
@@ -367,6 +372,13 @@ public struct Cleaner: Sendable {
     }
     return result
   }
+}
+
+func isPermissionError(_ error: Error) -> Bool {
+  let error = error as NSError
+  if error.domain == NSCocoaErrorDomain, [NSFileWriteNoPermissionError, NSFileReadNoPermissionError].contains(error.code) { return true }
+  let posix = (error.userInfo[NSUnderlyingErrorKey] as? NSError) ?? error
+  return posix.domain == NSPOSIXErrorDomain && [Int(EACCES), Int(EPERM)].contains(posix.code)
 }
 
 /// "com.spotify.client" → "Spotify" (installed app name), "MyApp-bxkqzyr…" → "MyApp", "org.swift.swiftpm" → "swiftpm".

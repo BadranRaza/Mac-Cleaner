@@ -130,6 +130,19 @@ struct ReclaimTests {
   }
 
   @Test
+  func adminTrashScriptQuotesPathsSafely() {
+    let trash = URL(fileURLWithPath: "/nonexistent/.Trash")
+    let script = adminTrashScript([URL(fileURLWithPath: "/Applications/My \"Odd\" App.app")], trash: trash)
+    #expect(script.hasPrefix("do shell script \"/bin/mv -f \" & quoted form of \"/Applications/My \\\"Odd\\\" App.app\""))
+    #expect(script.hasSuffix("quoted form of \"/nonexistent/.Trash/My \\\"Odd\\\" App.app\" with administrator privileges"))
+    // It must compile as AppleScript.
+    #expect(NSAppleScript(source: script)?.compileAndReturnError(nil) == true)
+    let two = adminTrashScript([URL(fileURLWithPath: "/Applications/A.app"), URL(fileURLWithPath: "/Library/B")], trash: trash)
+    #expect(two.contains(" && "))
+    #expect(NSAppleScript(source: two)?.compileAndReturnError(nil) == true)
+  }
+
+  @Test
   func friendlyNames() {
     #expect(friendlyName("MyApp-bxkqzyrcgqlmnbfqnmgmyfxkdvkh", appID: nil) == "MyApp")
     #expect(friendlyName("org.swift.swiftpm", appID: nil) == "swiftpm")

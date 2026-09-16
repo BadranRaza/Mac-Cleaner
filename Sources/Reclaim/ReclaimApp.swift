@@ -56,7 +56,7 @@ final class Model {
   var appToRemove: InstalledApp?
   var plan: [Finding]?
   var planSelection: Set<URL> = []
-  var uninstallMessage: String?
+  var uninstallMessage: (text: String, ok: Bool)?
 
   var groups: [FileGroup] { FileGroup.allCases.filter { !findings(in: $0).isEmpty } }
   var selected: [Finding] { findings.map { $0.only(selection) }.filter { !$0.targets.isEmpty } }
@@ -174,11 +174,13 @@ final class Model {
       record(result)
       scannedAt = nil
       if result.failures.isEmpty {
-        uninstallMessage = "\(app.name) and its files (\(format(result.trashedBytes))) are in the Trash. Empty the Trash to free the space."
+        uninstallMessage = ("\(app.name) and its files (\(format(result.trashedBytes))) are in the Trash. Empty the Trash to free the space.", true)
         apps.removeAll { $0 == app }
         appToRemove = nil
+      } else if result.passwordDeclined {
+        uninstallMessage = ("\(app.name) wasn't removed. It was installed for everyone on this Mac, so macOS needs your password.", false)
       } else {
-        uninstallMessage = result.failures.first
+        uninstallMessage = ("Some of \(app.name)'s items couldn't be moved to the Trash. They may be in use; quit apps that use them and try again.", false)
       }
     }
   }
@@ -1094,10 +1096,15 @@ struct UninstallView: View {
         .keyboardShortcut(.cancelAction)
 
         if let message = model.uninstallMessage {
-          Label(message, systemImage: "checkmark.circle.fill")
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Brand.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+          Label {
+            Text(message.text)
+          } icon: {
+            Image(systemName: message.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+              .foregroundStyle(message.ok ? Brand.teal : .orange)
+          }
+          .padding(12)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .background((message.ok ? Brand.teal : .orange).opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
 
         if let app = model.appToRemove { planView(app) } else { appList }
@@ -1153,6 +1160,10 @@ struct UninstallView: View {
           Text(app.name).font(.system(size: 26, weight: .bold, design: .rounded))
           Text("The app and the files it created. Anything marked Check first only matches by name.")
             .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          if !FileManager.default.isWritableFile(atPath: app.url.path) {
+            Label("Installed for everyone on this Mac, so macOS will ask for your password.", systemImage: "lock.fill")
+              .font(.callout).foregroundStyle(.orange)
+          }
         }
       }
       if let plan = model.plan {

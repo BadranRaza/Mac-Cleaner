@@ -122,6 +122,40 @@ extension Cleaner {
         return result
       }
     }
-    return await Task.detached { clean(plan) }.value
+    var result = await Task.detached { clean(plan) }.value
+    guard !result.needsPassword.isEmpty else { return result }
+
+    // Apps installed for all users are owned by the system; like Finder, ask for the password once.
+    let locked = result.needsPassword
+    let trash = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash")
+    var error: NSDictionary?
+    NSAppleScript(source: adminTrashScript(locked, trash: trash))?.executeAndReturnError(&error)
+    if let error {
+      result.passwordDeclined = (error[NSAppleScript.errorNumber] as? Int) == -128
+      return result
+    }
+    let sizes = Dictionary(plan.flatMap(\.targets).map { ($0.url, $0.bytes) }, uniquingKeysWith: { a, _ in a })
+    result.trashedBytes += locked.reduce(0) { $0 + (sizes[$1] ?? 0) }
+    result.failures.removeAll { failure in locked.contains { failure.hasPrefix($0.path + ":") } }
+    result.needsPassword = []
+    return result
   }
+}
+
+/// AppleScript that moves items into the Trash as an administrator, with one password prompt.
+func adminTrashScript(_ items: [URL], trash: URL, now: Date = Date()) -> String {
+  func literal(_ text: String) -> String {
+    "\"" + text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+  }
+  let stamp = now.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits)).replacingOccurrences(of: ":", with: ".")
+  let moves = items.map { item -> String in
+    var destination = trash.appendingPathComponent(item.lastPathComponent)
+    if FileManager.default.fileExists(atPath: destination.path) {
+      let base = item.deletingPathExtension().lastPathComponent
+      let ext = item.pathExtension.isEmpty ? "" : ".\(item.pathExtension)"
+      destination = trash.appendingPathComponent("\(base) \(stamp)\(ext)")
+    }
+    return "\"/bin/mv -f \" & quoted form of \(literal(item.path)) & \" \" & quoted form of \(literal(destination.path))"
+  }
+  return "do shell script " + moves.joined(separator: " & \" && \" & ") + " with administrator privileges"
 }
