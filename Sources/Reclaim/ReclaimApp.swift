@@ -364,10 +364,35 @@ struct ContentView: View {
   }
 }
 
+enum Layout {
+  /// Widest a list gets; beyond this, lines become hard to follow on big screens.
+  static let readable: CGFloat = 960
+}
+
 struct HomeView: View {
   let model: Model
 
   var body: some View {
+    // Designed for the default window; on bigger windows (full screen) everything grows together.
+    GeometryReader { geo in
+      let scale = min(1.5, max(1, min(geo.size.width / 880, geo.size.height / 700)))
+      content
+        .frame(width: geo.size.width / scale, height: geo.size.height / scale)
+        .scaleEffect(scale)
+        .frame(width: geo.size.width, height: geo.size.height)
+    }
+    .task { model.estimate() }
+    .background {
+      // Soft brand glow across the whole window.
+      GeometryReader { geo in
+        RadialGradient(colors: [Brand.teal.opacity(0.22), .clear], center: .top, startRadius: 0,
+                       endRadius: max(geo.size.width, geo.size.height) * 0.7)
+      }
+      .ignoresSafeArea()
+    }
+  }
+
+  private var content: some View {
     VStack(spacing: 30) {
       if !model.hasFullDiskAccess { AccessBanner().frame(maxWidth: 640) }
       Spacer(minLength: 0)
@@ -412,12 +437,6 @@ struct HomeView: View {
       .font(.caption).foregroundStyle(.tertiary)
     }
     .padding(32)
-    .task { model.estimate() }
-    .background(alignment: .top) {
-      // Soft brand glow behind the hero.
-      RadialGradient(colors: [Brand.teal.opacity(0.22), .clear], center: .top, startRadius: 0, endRadius: 520)
-        .ignoresSafeArea()
-    }
   }
 }
 
@@ -831,7 +850,7 @@ struct ResultsView: View {
         if let group = model.openGroup { GroupDetail(model: model, group: group) } else { overview }
       }
       .padding(.horizontal, 28).padding(.top, 36).padding(.bottom, 20)
-      .frame(maxWidth: 760)
+      .frame(maxWidth: Layout.readable)
       .frame(maxWidth: .infinity)
     }
     .id(model.openGroup)
@@ -895,7 +914,8 @@ struct ResultsView: View {
         Text(confirmMessage)
       }
     }
-    .padding(.horizontal, 28).padding(.vertical, 14)
+    // Line the bar up with the list above instead of the window edges.
+    .padding(.horizontal, 28).frame(maxWidth: Layout.readable).frame(maxWidth: .infinity).padding(.vertical, 14)
     .background(.bar)
     .animation(.smooth, value: model.selectedBytes)
   }
@@ -1083,7 +1103,7 @@ struct UninstallView: View {
         if let app = model.appToRemove { planView(app) } else { appList }
       }
       .padding(.horizontal, 28).padding(.top, 36).padding(.bottom, 20)
-      .frame(maxWidth: 760)
+      .frame(maxWidth: Layout.readable)
       .frame(maxWidth: .infinity)
     }
     .safeAreaInset(edge: .bottom) {
@@ -1177,7 +1197,8 @@ struct UninstallView: View {
         Text("\(app.name) will quit, and the selected items move to the Trash. You can put them back from the Trash.")
       }
     }
-    .padding(.horizontal, 28).padding(.vertical, 14)
+    // Line the bar up with the list above instead of the window edges.
+    .padding(.horizontal, 28).frame(maxWidth: Layout.readable).frame(maxWidth: .infinity).padding(.vertical, 14)
     .background(.bar)
   }
 }
