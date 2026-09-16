@@ -138,6 +138,9 @@ extension Cleaner {
     NSAppleScript(source: adminTrashScript(locked, trash: trash))?.executeAndReturnError(&error)
     if let error {
       result.passwordDeclined = (error[NSAppleScript.errorNumber] as? Int) == -128
+      if !result.passwordDeclined, let message = error[NSAppleScript.errorMessage] as? String {
+        result.failures.insert("macOS said: \(message)", at: 0)
+      }
       return result
     }
     // Sizes of the items that were moved; a locked path is a whole target or one of its paths.
@@ -162,7 +165,10 @@ func adminTrashScript(_ items: [URL], trash: URL, now: Date = Date()) -> String 
       let ext = item.pathExtension.isEmpty ? "" : ".\(item.pathExtension)"
       destination = trash.appendingPathComponent("\(base) \(stamp)\(ext)")
     }
-    return "\"/bin/mv -f \" & quoted form of \(literal(item.path)) & \" \" & quoted form of \(literal(destination.path))"
+    // Home folders carry "everyone: deny delete" rules that block moving them even as admin, and would
+    // block emptying the Trash later; clear them on the item being removed first.
+    let source = "quoted form of \(literal(item.path))"
+    return "\"/bin/chmod -RN \" & \(source) & \" 2>/dev/null || true; /bin/mv -f \" & \(source) & \" \" & quoted form of \(literal(destination.path))"
   }
-  return "do shell script " + moves.joined(separator: " & \" && \" & ") + " with administrator privileges"
+  return "do shell script \"set -e; \" & " + moves.joined(separator: " & \"; \" & ") + " with administrator privileges"
 }

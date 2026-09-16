@@ -161,13 +161,40 @@ struct ReclaimTests {
   func adminTrashScriptQuotesPathsSafely() {
     let trash = URL(fileURLWithPath: "/nonexistent/.Trash")
     let script = adminTrashScript([URL(fileURLWithPath: "/Applications/My \"Odd\" App.app")], trash: trash)
-    #expect(script.hasPrefix("do shell script \"/bin/mv -f \" & quoted form of \"/Applications/My \\\"Odd\\\" App.app\""))
+    #expect(script.hasPrefix("do shell script \"set -e; \" & \"/bin/chmod -RN \" & quoted form of \"/Applications/My \\\"Odd\\\" App.app\""))
+    #expect(script.contains("/bin/mv -f \" & quoted form of \"/Applications/My \\\"Odd\\\" App.app\""))
     #expect(script.hasSuffix("quoted form of \"/nonexistent/.Trash/My \\\"Odd\\\" App.app\" with administrator privileges"))
     // It must compile as AppleScript.
     #expect(NSAppleScript(source: script)?.compileAndReturnError(nil) == true)
     let two = adminTrashScript([URL(fileURLWithPath: "/Applications/A.app"), URL(fileURLWithPath: "/Library/B")], trash: trash)
-    #expect(two.contains(" && "))
+    #expect(two.components(separatedBy: "/bin/mv -f").count == 3)
     #expect(NSAppleScript(source: two)?.compileAndReturnError(nil) == true)
+  }
+
+  @Test
+  func trashScriptMovesProtectedHomeFolders() throws {
+    let home = try FixtureHome()
+    defer { home.remove() }
+    let account = home.url.appendingPathComponent("Users/gone")
+    let trash = home.url.appendingPathComponent(".Trash")
+    try home.write(account.appendingPathComponent("Documents/file"))
+    try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+    for folder in [account, account.appendingPathComponent("Documents")] {
+      let chmod = Process()
+      chmod.executableURL = URL(fileURLWithPath: "/bin/chmod")
+      chmod.arguments = ["+a", "group:everyone deny delete", folder.path]
+      try chmod.run()
+      chmod.waitUntilExit()
+    }
+    #expect(throws: (any Error).self) { try FileManager.default.trashItem(at: account, resultingItemURL: nil) }
+
+    // Same script as with the password, minus the elevation.
+    let script = adminTrashScript([account], trash: trash).replacingOccurrences(of: " with administrator privileges", with: "")
+    var error: NSDictionary?
+    NSAppleScript(source: script)?.executeAndReturnError(&error)
+    #expect(error == nil)
+    #expect(!FileManager.default.fileExists(atPath: account.path))
+    #expect(FileManager.default.fileExists(atPath: trash.appendingPathComponent("gone/Documents/file").path))
   }
 
   @Test
