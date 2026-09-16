@@ -257,13 +257,9 @@ private struct HeroCard: View {
     MacPanel(tint: Palette.canvas, style: .dark) {
       HStack(alignment: .top, spacing: 24) {
         VStack(alignment: .leading, spacing: 14) {
-          Text("Reclaim")
+          Text("Mac Cleaner")
             .font(.system(size: 42, weight: .bold, design: .serif))
             .foregroundStyle(Palette.alabaster)
-
-          Text("v\(MacCleanerVersion.current)")
-            .font(.system(size: 14, weight: .bold, design: .rounded))
-            .foregroundStyle(Palette.smoke)
 
           IconPill(systemName: "folder.fill", value: "\(selectedRootCount)", accent: Palette.sand)
         }
@@ -309,13 +305,13 @@ private struct IdleOverviewCard: View {
           Image(systemName: "sparkles.rectangle.stack.fill")
             .font(.system(size: 20, weight: .semibold))
             .foregroundStyle(Palette.sand)
-          Text("System Scan")
+          Text("First Scan")
             .font(.system(size: 34, weight: .bold, design: .serif))
             .foregroundStyle(Palette.alabaster)
         }
 
         HStack(spacing: 14) {
-          OnboardingTile(systemName: "desktopcomputer", title: "All Users", accent: Palette.sand)
+          OnboardingTile(systemName: "folder.badge.plus", title: "Folders", accent: Palette.sand)
           OnboardingTile(systemName: "slider.horizontal.3", title: "Scope", accent: Palette.sage)
           OnboardingTile(systemName: "magnifyingglass", title: "Scan", accent: Palette.amber)
         }
@@ -327,7 +323,7 @@ private struct IdleOverviewCard: View {
         HStack(spacing: 14) {
           CapabilityTile(systemName: "hammer.circle.fill", title: "Xcode", accent: Palette.sand)
           CapabilityTile(systemName: "cube.box.fill", title: "Unity", accent: Palette.sage)
-          CapabilityTile(systemName: "externaldrive.fill", title: "/Users", accent: Palette.sea)
+          CapabilityTile(systemName: "lock.shield.fill", title: "Scoped", accent: Palette.sea)
         }
 
         Spacer(minLength: 0)
@@ -359,7 +355,7 @@ private struct ScanControlCard: View {
           .font(.system(size: 28, weight: .bold, design: .serif))
           .foregroundStyle(Palette.alabaster)
           
-        Text("Analyzes all user profiles under /Users for hidden caches, logs, developer leftovers, and trash.")
+        Text("Analyzes all user profiles (e.g. /Users) for hidden caches, logs, developer leftovers, and trash.")
           .font(.system(size: 14, weight: .regular, design: .rounded))
           .foregroundStyle(Palette.smoke)
           .multilineTextAlignment(.center)
@@ -382,6 +378,32 @@ private struct ScanControlCard: View {
         .padding(.top, 14)
       }
     }
+  }
+}
+
+private struct ScanRootRow: View {
+  let url: URL
+  let onRemove: () -> Void
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "folder.fill")
+        .foregroundStyle(Palette.sand)
+      Text(url.path)
+        .font(.system(size: 16, design: .monospaced))
+        .foregroundStyle(Palette.alabaster)
+        .lineLimit(1)
+      Spacer(minLength: 6)
+      Button {
+        onRemove()
+      } label: {
+        Image(systemName: "xmark.circle.fill")
+      }
+      .buttonStyle(.plain)
+      .foregroundStyle(Palette.smoke)
+      .help("Remove folder")
+    }
+    .padding(.horizontal, 6)
   }
 }
 
@@ -558,7 +580,7 @@ MacPanel(tint: Palette.ink, style: .dark) {
     }
 
         if items.isEmpty {
-          Text("No cleanup findings detected in the system-wide scan.")
+          Text("No cleanup findings detected in the selected folders.")
             .font(.system(size: 14, weight: .medium, design: .rounded))
             .foregroundStyle(Palette.smoke)
             .padding(.vertical, 8)
@@ -1146,12 +1168,12 @@ private struct FlowLayout: Layout {
 
 @MainActor
 final class ScanStore: ObservableObject {
-  @Published var selectedRoots: [URL] = [URL(fileURLWithPath: "/Users")]
-  @Published var isScanning: Bool = false
-  @Published var isCleaning: Bool = false
-  @Published var status: String = "Ready"
-  @Published var lastReport: CleanupScanReport?
-  @Published var selectedFindingIDs: Set<String> = []
+@Published var selectedRoots: [URL] = [URL(fileURLWithPath: "/Users")]
+@Published var isScanning: Bool = false
+@Published var isCleaning: Bool = false
+@Published var status: String = "Ready"
+@Published var lastReport: CleanupScanReport?
+@Published var selectedFindingIDs: Set<String> = []
 
   init() {}
 
@@ -1232,7 +1254,7 @@ func cleanSelected() {
             itemsRemoved += 1
           }
         } catch {
-          print("Reclaim Error: Failed to remove \(targetURL.path) - \(error.localizedDescription)")
+          print("Mac Cleaner Error: Failed to remove \(targetURL.path) - \(error.localizedDescription)")
         }
       }
       bytesFreed += item.estimatedBytes
