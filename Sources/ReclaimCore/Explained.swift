@@ -52,7 +52,8 @@ extension Cleaner {
           title: "Files of deleted account “\(folder.lastPathComponent)”", 
           advice: "The account is gone but its files stayed. Look through them from another account first, then remove them in Terminal (it deletes for good).",
           url: folder, bytes: allocatedSize(of: folder),
-          command: "sudo chmod -RN \(quoted) && sudo rm -rf \(quoted)"))
+          // chmod reports broken links inside old app containers and exits non-zero, so don't chain with &&.
+          command: "sudo chmod -RN \(quoted) 2>/dev/null; sudo rm -rf \(quoted)"))
       }
     }
 
