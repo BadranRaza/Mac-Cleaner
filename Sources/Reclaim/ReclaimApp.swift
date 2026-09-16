@@ -64,17 +64,47 @@ final class Model {
     findings(in: group).flatMap(\.targets).filter { selection.contains($0.url) }.reduce(0) { $0 + $1.bytes }
   }
 
-  func scan(quick: Bool = false) {
-    phase = .scanning
+  /// When the current findings were measured; recent results are reused instead of scanning again.
+  var scannedAt: Date?
+  private var estimateTask: Task<Void, Never>?
+  var isEstimating: Bool { estimateTask != nil }
+  var safeBytes: Int64 { findings.filter(\.preselected).reduce(0) { $0 + $1.bytes } }
+
+  /// Read-only background scan for the home screen, so it can show what can be reclaimed.
+  func estimate() {
+    guard estimateTask == nil, phase == .idle, !isFresh else { return }
+    estimateTask = Task {
+      await measure()
+      estimateTask = nil
+    }
+  }
+
+  private var isFresh: Bool { scannedAt.map { Date().timeIntervalSince($0) < 120 } ?? false }
+
+  private func measure() async {
+    async let explained = Task.detached(priority: .utility) { await Cleaner().insights() }.value
+    let results = await Task.detached(priority: .userInitiated) { await Cleaner().scan() }.value
+    guard !Task.isCancelled else { return }
+    insights = await explained
+    findings = results
+    selection = Set(results.filter(\.preselected).flatMap { $0.targets.map(\.url) })
+    scannedAt = Date()
+  }
+
+  func scan(quick: Bool = false, force: Bool = false) {
     openGroup = nil
+    let next: () -> Phase = { quick && !self.findings.isEmpty ? .quickReview : .results }
+    if !force, isFresh, estimateTask == nil {
+      selection = Set(findings.filter(\.preselected).flatMap { $0.targets.map(\.url) })
+      phase = next()
+      return
+    }
+    phase = .scanning
     scanTask = Task {
-      async let explained = Task.detached(priority: .utility) { await Cleaner().insights() }.value
-      let results = await Task.detached(priority: .userInitiated) { await Cleaner().scan() }.value
+      // Reuse a background scan that is already running.
+      if let running = estimateTask, !force { await running.value } else { await measure() }
       guard !Task.isCancelled else { return }
-      insights = await explained
-      findings = results
-      selection = Set(results.filter(\.preselected).flatMap { $0.targets.map(\.url) })
-      phase = quick && !results.isEmpty ? .quickReview : .results
+      phase = next()
     }
   }
 
@@ -88,6 +118,7 @@ final class Model {
     phase = .cleaning
     Task {
       result = await Task.detached(priority: .userInitiated) { Cleaner.clean(chosen) }.value
+      scannedAt = nil  // what's on disk changed
       phase = .done
     }
   }
@@ -321,7 +352,8 @@ struct HomeView: View {
       if !model.hasFullDiskAccess { AccessBanner().frame(maxWidth: 640) }
       Spacer(minLength: 0)
       HStack(spacing: 40) {
-        DiskRing()
+        DiskRing(safe: model.scannedAt == nil ? nil : model.safeBytes,
+                 more: model.foundBytes - model.safeBytes, checking: model.isEstimating)
         VStack(alignment: .leading, spacing: 10) {
           HStack(spacing: 8) {
             Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 26, height: 26)
@@ -355,6 +387,7 @@ struct HomeView: View {
       .font(.caption).foregroundStyle(.tertiary)
     }
     .padding(32)
+    .task { model.estimate() }
     .background(alignment: .top) {
       // Soft brand glow behind the hero.
       RadialGradient(colors: [Brand.teal.opacity(0.22), .clear], center: .top, startRadius: 0, endRadius: 520)
@@ -363,8 +396,13 @@ struct HomeView: View {
   }
 }
 
-/// Ring showing how full the disk is, with free space in the middle.
+/// Ring showing used space, the part of it Quick Clean can reclaim, and free space.
 struct DiskRing: View {
+  /// Safe bytes Quick Clean would free; nil until the background check finishes.
+  var safe: Int64?
+  /// More that could go after review.
+  var more: Int64 = 0
+  var checking = false
   @State private var shown = false
   private let volume = try? URL(fileURLWithPath: NSHomeDirectory())
     .resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey])
@@ -373,22 +411,61 @@ struct DiskRing: View {
     let total = Double(max(1, volume?.volumeTotalCapacity ?? 1))
     let free = Double(volume?.volumeAvailableCapacityForImportantUsage ?? 0)
     let used = min(1, max(0, (total - free) / total))
-    ZStack {
-      Circle().stroke(.quaternary, lineWidth: 16)
-      Circle()
-        .trim(from: 0, to: shown ? used : 0)
-        .stroke(Brand.gradient, style: StrokeStyle(lineWidth: 16, lineCap: .round))
-        .rotationEffect(.degrees(-90))
-        .shadow(color: Brand.teal.opacity(0.35), radius: 8)
-      VStack(spacing: 2) {
-        Text(format(Int64(free))).font(.system(size: 26, weight: .bold, design: .rounded)).monospacedDigit()
-        Text("free of \(format(Int64(total)))").font(.caption).foregroundStyle(.secondary)
+    let reclaim = min(used, Double(safe ?? 0) / total)
+    VStack(spacing: 14) {
+      ZStack {
+        Circle().stroke(.quaternary, lineWidth: 16)
+        Circle()
+          .trim(from: 0, to: shown ? used : 0)
+          .stroke(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 16, lineCap: .butt))
+          .rotationEffect(.degrees(-90))
+        // The reclaimable part sits at the end of the used arc, so it reads as "this much comes back".
+        Circle()
+          .trim(from: shown ? used - reclaim : used, to: shown ? used : used)
+          .stroke(Brand.gradient, style: StrokeStyle(lineWidth: 24, lineCap: .round))
+          .rotationEffect(.degrees(-90))
+          .shadow(color: Brand.teal.opacity(0.6), radius: 10)
+        VStack(spacing: 2) {
+          Text(format(Int64(free))).font(.system(size: 26, weight: .bold, design: .rounded)).monospacedDigit()
+          Text("free of \(format(Int64(total)))").font(.caption).foregroundStyle(.secondary)
+          if let safe, safe > 0 {
+            Text("+\(format(safe)) after cleaning").font(.caption.weight(.semibold)).foregroundStyle(Brand.teal)
+              .contentTransition(.numericText())
+              .padding(.top, 2)
+          } else if checking {
+            ProgressView().controlSize(.mini).padding(.top, 4)
+          }
+        }
+      }
+      .frame(width: 180, height: 180)
+      .animation(.smooth(duration: 0.9), value: safe)
+
+      VStack(spacing: 4) {
+        HStack(spacing: 12) {
+          LegendDot(color: .secondary.opacity(0.45), label: "Used")
+          LegendDot(color: Brand.teal, label: "Can reclaim")
+          LegendDot(color: .secondary.opacity(0.18), label: "Free")
+        }
+        Text(safe == nil ? "Checking what can be reclaimed…"
+             : more > 0 ? "Up to \(format(more)) more after review" : " ")
+          .font(.caption2).foregroundStyle(.tertiary)
       }
     }
-    .frame(width: 180, height: 180)
     .onAppear { withAnimation(.smooth(duration: 1.1)) { shown = true } }
     .accessibilityElement(children: .combine)
-    .accessibilityLabel("\(format(Int64(free))) free of \(format(Int64(total)))")
+    .accessibilityLabel("\(format(Int64(free))) free of \(format(Int64(total)))" + (safe.map { ", \(format($0)) can be reclaimed" } ?? ""))
+  }
+}
+
+struct LegendDot: View {
+  let color: Color
+  let label: String
+
+  var body: some View {
+    HStack(spacing: 5) {
+      Circle().fill(color).frame(width: 8, height: 8)
+      Text(label).font(.caption2).foregroundStyle(.secondary)
+    }
   }
 }
 
@@ -562,7 +639,7 @@ struct DoneView: View {
           .help(result.failures.joined(separator: "\n"))
       }
       HStack(spacing: 12) {
-        Button("Scan Again") { model.scan() }.controlSize(.large)
+        Button("Scan Again") { model.scan(force: true) }.controlSize(.large)
         Button("Done", action: model.goHome)
           .buttonStyle(PrimaryButton())
           .keyboardShortcut(.defaultAction)
@@ -600,7 +677,7 @@ struct ResultsView: View {
         }
         Spacer()
         Button("Uninstall Apps", action: model.openUninstall)
-        Button("Scan Again") { model.scan() }
+        Button("Scan Again") { model.scan(force: true) }
       }
       if !model.hasFullDiskAccess { AccessBanner() }
       Card(items: model.groups) { GroupRow(model: model, group: $0) }
